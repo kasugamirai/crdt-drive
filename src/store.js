@@ -20,7 +20,7 @@ import { deriveKey, encryptBytes, decryptBytes, encryptToB64, decryptFromB64 } f
 
 const CHUNK = 64 * 1024          // 64KB raw per chunk
 const SHARD_RAW = 6 * 1024 * 1024 // ≤6MB raw per shard room (≈8MB base64, safely under the ~12MB ceiling)
-const CONCURRENCY = 10           // how many shard rooms to transfer in parallel (up & down)
+const CONCURRENCY = 20           // how many shard rooms to transfer in parallel (up & down)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 export class Store {
