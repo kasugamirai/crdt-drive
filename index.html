@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CRDT 网盘</title>
+</head>
+<body>
+<header>
+  <h1>📁 CRDT 网盘</h1>
+  <span class="pill"><span id="dot" class="dot"></span><span id="status">连接中…</span></span>
+  <span class="pill">👥 在线 <b id="online">1</b></span>
+  <span class="pill">总计 <b id="total">0 B</b></span>
+</header>
+
+<main>
+  <div class="row">
+    <input id="room" type="text" class="grow" placeholder="网盘名(房间号)" />
+    <button id="switch" class="ghost">切换网盘</button>
+    <button id="share" class="ghost">复制分享链接</button>
+  </div>
+
+  <div class="note">
+    数据存放在 reearth-flow 的 <b>共享开发版 Y-WebSocket 服务</b>(<code id="wsurl"></code>)上,无鉴权、不保证持久化与隐私。
+    无单文件大小限制,但文件越大每个访客全量下载越慢。同一「网盘名」的人都能看到彼此的文件。
+  </div>
+
+  <div class="toolbar">
+    <div id="breadcrumb"></div>
+    <input id="search" type="search" placeholder="🔍 全局搜索文件名…" />
+  </div>
+
+  <div id="chips"></div>
+
+  <div class="row">
+    <button id="btn-newfolder" class="ghost">📁 新建文件夹</button>
+    <button id="btn-upload">⬆️ 上传文件</button>
+    <button id="btn-upfolder" class="ghost">📂 上传文件夹</button>
+  </div>
+
+  <div id="drop">
+    点击或拖拽文件到这里上传到当前目录
+    <div id="bar" class="bar"><div></div></div>
+  </div>
+  <input id="file" type="file" multiple hidden />
+  <input id="folder" type="file" webkitdirectory hidden />
+
+  <table>
+    <thead><tr><th>名称</th><th>大小</th><th>类型</th><th>修改时间</th><th></th></tr></thead>
+    <tbody id="list"></tbody>
+  </table>
+  <div id="empty" class="empty"></div>
+</main>
+
+<div id="modal">
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button id="modal-close">✕</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
