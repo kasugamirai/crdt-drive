@@ -16,7 +16,7 @@ const state = { cwd: '', search: '', cat: 'all' }
 // ---------- connection ----------
 store.on('status', s => {
   const on = s === 'connected'
-  $('dot').className = 'dot ' + (on ? 'on' : 'off')
+  $('dot').className = 'dot ' + (on ? 'dot-on' : 'dot-off')
   $('status').textContent = on ? '已连接' : (s === 'connecting' ? '连接中…' : '已断开')
 })
 store.on('online', n => $('online').textContent = n)
@@ -37,7 +37,6 @@ function connect(room) {
 
 // ---------- rendering ----------
 function render() {
-  $('wsurl').textContent = WS_URL
   $('total').textContent = fmt(store.totalSize())
   renderBreadcrumb()
 
@@ -63,15 +62,24 @@ function render() {
     : '这里还没有内容,上传或新建文件夹吧 👆'
 }
 
+const ROW = 'border-t border-white/5 transition hover:bg-white/[.03]'
+const CELL = 'px-4 py-3 align-middle'
+
 function folderRow(folder) {
   const tr = document.createElement('tr')
-  tr.className = 'folder'
+  tr.className = ROW
   tr.innerHTML = `
-    <td class="name">📁 <span></span></td>
-    <td>—</td><td><small class="muted">文件夹</small></td><td></td>
-    <td class="actions"><button class="iconbtn del">删除</button></td>`
-  tr.querySelector('span').textContent = folder.name
-  tr.querySelector('.name').onclick = () => { state.cwd = folder.path; render() }
+    <td class="${CELL}">
+      <button class="nav flex items-center gap-2 text-left font-medium transition hover:text-brand-400">
+        <span class="text-lg">📁</span><span class="fname break-all"></span>
+      </button>
+    </td>
+    <td class="${CELL} text-slate-500">—</td>
+    <td class="${CELL} text-sm text-slate-500">文件夹</td>
+    <td class="${CELL}"></td>
+    <td class="${CELL} whitespace-nowrap text-right"><button class="iconbtn del hover:text-red-400">删除</button></td>`
+  tr.querySelector('.fname').textContent = folder.name
+  tr.querySelector('.nav').onclick = () => { state.cwd = folder.path; render() }
   tr.querySelector('.del').onclick = e => {
     e.stopPropagation()
     if (confirm(`删除文件夹「${folder.name}」及其中所有内容?`)) store.deleteFolder(folder.path)
@@ -82,22 +90,27 @@ function folderRow(folder) {
 function fileRow(f, showPath) {
   const cat = categoryOf(f.type, f.name)
   const tr = document.createElement('tr')
+  tr.className = ROW
   const can = !!previewKind(f.type, f.name)
+  const nameInner = `<span class="text-lg">${CATEGORY_ICON[cat]}</span><span class="fname break-all font-medium"></span>${showPath ? '<small class="path text-slate-500"></small>' : ''}`
   tr.innerHTML = `
-    <td class="name">${CATEGORY_ICON[cat]} <span class="fname"></span>${showPath ? ' <small class="muted path"></small>' : ''}</td>
-    <td>${fmt(f.size)}</td>
-    <td><small class="muted">${esc(CATEGORY_LABEL[cat])}</small></td>
-    <td><small class="muted">${new Date(f.time).toLocaleString()}</small></td>
-    <td class="actions">
+    <td class="${CELL}">
+      ${can
+        ? `<button class="pvname flex items-center gap-2 text-left transition hover:text-brand-400">${nameInner}</button>`
+        : `<div class="flex items-center gap-2">${nameInner}</div>`}
+    </td>
+    <td class="${CELL} text-slate-400">${fmt(f.size)}</td>
+    <td class="${CELL} text-sm text-slate-400">${esc(CATEGORY_LABEL[cat])}</td>
+    <td class="${CELL} text-sm text-slate-500">${new Date(f.time).toLocaleString()}</td>
+    <td class="${CELL} whitespace-nowrap text-right">
       ${can ? '<button class="iconbtn pv">预览</button>' : ''}
       <button class="iconbtn dl">下载</button>
-      <button class="iconbtn del">删除</button>
+      <button class="iconbtn del hover:text-red-400">删除</button>
     </td>`
   tr.querySelector('.fname').textContent = f.name
   if (showPath) tr.querySelector('.path').textContent = '· ' + (f.dir || '根目录') + '/'
   if (can) {
-    tr.querySelector('.name').classList.add('clickable')
-    tr.querySelector('.name').onclick = () => openPreview(store, f)
+    tr.querySelector('.pvname').onclick = () => openPreview(store, f)
     tr.querySelector('.pv').onclick = () => openPreview(store, f)
   }
   tr.querySelector('.dl').onclick = () => downloadFile(f)
@@ -125,7 +138,7 @@ function renderBreadcrumb() {
     let acc = ''
     for (const part of state.cwd.split('/')) {
       acc = pathJoin(acc, part)
-      bc.appendChild(Object.assign(document.createElement('span'), { className: 'sep', textContent: '/' }))
+      bc.appendChild(Object.assign(document.createElement('span'), { className: 'text-slate-600', textContent: '/' }))
       bc.appendChild(crumb(part, acc))
     }
   }
@@ -136,7 +149,7 @@ function renderChips() {
   const cats = ['all', 'image', 'video', 'audio', 'doc', 'archive', 'other']
   for (const c of cats) {
     const b = document.createElement('button')
-    b.className = 'chip' + (state.cat === c ? ' active' : '')
+    b.className = 'chip' + (state.cat === c ? ' chip-active' : '')
     b.textContent = c === 'all' ? '全部' : CATEGORY_ICON[c] + ' ' + CATEGORY_LABEL[c]
     b.onclick = () => { state.cat = c; renderChips(); render() }
     wrap.appendChild(b)
@@ -154,7 +167,12 @@ async function uploadMany(files, baseDir, useRelative) {
     const sub = dirName(rel)
     const dir = sub ? pathJoin(baseDir, sub) : baseDir
     if (sub) store.createFolder(baseDir, sub.split('/')[0]) // ensure top folder visible
-    await store.upload(file, dir, p => setBar((done + p) / files.length))
+    try {
+      await store.upload(file, dir, p => setBar((done + p) / files.length))
+    } catch (e) {
+      alert(e.code === 'BUDGET' ? e.message : `上传「${file.name}」失败:${e.message}`)
+      break
+    }
     done++
   }
   showBar(false)

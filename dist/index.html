@@ -3,66 +3,102 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>CRDT 网盘</title>
-  <script type="module" crossorigin src="./assets/index-CCz8Fs0d.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CcK0VUBu.css">
+<title>CRDT Drive · 实时协同网盘</title>
+  <script type="module" crossorigin src="./assets/index-DhSFlSG-.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DbFtY0mB.css">
 </head>
-<body>
-<header>
-  <h1>📁 CRDT 网盘</h1>
-  <span class="pill"><span id="dot" class="dot"></span><span id="status">连接中…</span></span>
-  <span class="pill">👥 在线 <b id="online">1</b></span>
-  <span class="pill">总计 <b id="total">0 B</b></span>
-</header>
+<body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
 
-<main>
-  <div class="row">
-    <input id="room" type="text" class="grow" placeholder="网盘名(房间号)" />
-    <button id="switch" class="ghost">切换网盘</button>
-    <button id="share" class="ghost">复制分享链接</button>
-  </div>
-
-  <div class="note">
-    数据存放在 reearth-flow 的 <b>共享开发版 Y-WebSocket 服务</b>(<code id="wsurl"></code>)上,无鉴权、不保证持久化与隐私。
-    无单文件大小限制,但文件越大每个访客全量下载越慢。同一「网盘名」的人都能看到彼此的文件。
-  </div>
-
-  <div class="toolbar">
-    <div id="breadcrumb"></div>
-    <input id="search" type="search" placeholder="🔍 全局搜索文件名…" />
-  </div>
-
-  <div id="chips"></div>
-
-  <div class="row">
-    <button id="btn-newfolder" class="ghost">📁 新建文件夹</button>
-    <button id="btn-upload">⬆️ 上传文件</button>
-    <button id="btn-upfolder" class="ghost">📂 上传文件夹</button>
-  </div>
-
-  <div id="drop">
-    点击或拖拽文件到这里上传到当前目录
-    <div id="bar" class="bar"><div></div></div>
-  </div>
-  <input id="file" type="file" multiple hidden />
-  <input id="folder" type="file" webkitdirectory hidden />
-
-  <table>
-    <thead><tr><th>名称</th><th>大小</th><th>类型</th><th>修改时间</th><th></th></tr></thead>
-    <tbody id="list"></tbody>
-  </table>
-  <div id="empty" class="empty"></div>
-</main>
-
-<div id="modal">
-  <div class="modal-card">
-    <div class="modal-head">
-      <h3 id="modal-title"></h3>
-      <button id="modal-close">✕</button>
+  <!-- top bar -->
+  <header class="sticky top-0 z-20 border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-5 py-3.5">
+      <div class="flex items-center gap-2.5">
+        <div class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-600 text-lg shadow-lg shadow-brand-500/30">☁️</div>
+        <div>
+          <h1 class="text-[15px] font-semibold leading-none">CRDT Drive</h1>
+          <p class="mt-1 text-[11px] leading-none text-slate-500">实时协同网盘</p>
+        </div>
+      </div>
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        <span class="pill"><span id="dot" class="dot"></span><span id="status">连接中…</span></span>
+        <span class="pill">👥 在线 <b id="online" class="text-slate-100">1</b></span>
+        <span class="pill">💾 <b id="total" class="text-slate-100">0 B</b></span>
+      </div>
     </div>
-    <div id="modal-body"></div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-5 py-6">
+
+    <!-- drive selector -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      <div class="relative flex-1 min-w-[200px]">
+        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500">🗂️</span>
+        <input id="room" type="text" class="input w-full pl-9" placeholder="网盘名称（房间号）" />
+      </div>
+      <button id="switch" class="btn-ghost">切换网盘</button>
+      <button id="share" class="btn-ghost">🔗 复制分享链接</button>
+    </div>
+
+    <!-- toolbar: breadcrumb + search -->
+    <div class="mt-5 flex flex-wrap items-center gap-3">
+      <div id="breadcrumb" class="flex flex-1 flex-wrap items-center gap-1 text-sm"></div>
+      <div class="relative w-full sm:w-72">
+        <span class="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500">🔍</span>
+        <input id="search" type="search" class="input w-full pl-9" placeholder="全局搜索文件名…" />
+      </div>
+    </div>
+
+    <!-- category chips -->
+    <div id="chips" class="mt-4 flex flex-wrap gap-2"></div>
+
+    <!-- actions -->
+    <div class="mt-4 flex flex-wrap gap-2.5">
+      <button id="btn-newfolder" class="btn-ghost">📁 新建文件夹</button>
+      <button id="btn-upload" class="btn">⬆️ 上传文件</button>
+      <button id="btn-upfolder" class="btn-ghost">📂 上传文件夹</button>
+    </div>
+
+    <!-- dropzone -->
+    <div id="drop" class="mt-4 cursor-pointer rounded-2xl border-2 border-dashed border-white/10 bg-white/[.02] px-6 py-10 text-center text-slate-400 transition hover:border-white/20">
+      <div class="text-2xl">⬆️</div>
+      <p class="mt-2 text-sm">点击或拖拽文件到此处，上传到当前目录</p>
+      <div id="bar" class="mx-auto mt-4 hidden h-1.5 w-64 overflow-hidden rounded-full bg-white/10">
+        <div class="h-full w-0 bg-brand-500 transition-[width] duration-100"></div>
+      </div>
+    </div>
+    <input id="file" type="file" multiple hidden />
+    <input id="folder" type="file" webkitdirectory hidden />
+
+    <!-- file list -->
+    <div class="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[.02]">
+      <table class="w-full border-collapse">
+        <thead>
+          <tr class="text-left text-xs text-slate-500">
+            <th class="px-4 py-3 font-medium">名称</th>
+            <th class="px-4 py-3 font-medium">大小</th>
+            <th class="px-4 py-3 font-medium">类型</th>
+            <th class="px-4 py-3 font-medium">修改时间</th>
+            <th class="px-4 py-3"></th>
+          </tr>
+        </thead>
+        <tbody id="list"></tbody>
+      </table>
+      <div id="empty" class="px-4 py-16 text-center text-sm text-slate-500"></div>
+    </div>
+
+    <p class="mt-6 text-center text-xs text-slate-600">基于 CRDT 的端到端实时同步 · 多人同时在线无冲突合并</p>
+  </main>
+
+  <!-- preview modal -->
+  <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
+    <div class="flex max-h-[90vh] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+      <div class="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <h3 id="modal-title" class="flex-1 break-all text-sm font-semibold"></h3>
+        <button id="modal-close" class="grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10">✕</button>
+      </div>
+      <div id="modal-body" class="flex items-center justify-center overflow-auto p-4"></div>
+    </div>
   </div>
-</div>
 
 </body>
 </html>

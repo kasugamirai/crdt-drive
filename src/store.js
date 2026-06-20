@@ -8,6 +8,23 @@ import { WebsocketProvider } from 'y-websocket'
 import { parentPath, pathJoin } from './util.js'
 
 const CHUNK = 64 * 1024
+// The sync service's persistence cannot store binary (Uint8Array) values — a doc
+// containing any breaks reload and the whole room comes back empty after everyone
+// disconnects. So file bytes are stored as base64 STRINGS, which persist correctly.
+// Persisted docs also have a total-size ceiling (~12MB of base64); keep a margin.
+const DURABLE_BUDGET = 9 * 1024 * 1024 // max raw bytes per room (≈12MB base64)
+
+function bytesToB64(bytes) {
+  let bin = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+  return btoa(bin)
+}
+function b64ToBytes(b64) {
+  const bin = atob(b64)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
 
 export class Store {
   constructor(wsUrl, token) {
@@ -73,14 +90,22 @@ export class Store {
     if (path) this.dirs.set(path, { time: Date.now() })
   }
 
-  // upload one File into `dir`. onProgress(0..1). Chunks sent individually
-  // (small ws frames); meta written last so peers see complete data first.
+  // remaining durable budget (raw bytes) before the room hits the persistence ceiling
+  remainingBudget() { return DURABLE_BUDGET - this.totalSize() }
+
+  // upload one File into `dir`. onProgress(0..1). Chunks stored as base64 strings
+  // (binary doesn't survive server persistence); meta written last so peers see
+  // complete data first. Throws if it would exceed the durable budget.
   async upload(file, dir, onProgress) {
+    if (file.size > this.remainingBudget()) {
+      const e = new Error(`容量不足:本网盘可持久化总量约 ${Math.round(DURABLE_BUDGET / 1024 / 1024)}MB,「${file.name}」放不下`)
+      e.code = 'BUDGET'; throw e
+    }
     const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.round(performance.now())}`
     const buf = new Uint8Array(await file.arrayBuffer())
     const n = Math.ceil(buf.length / CHUNK)
     for (let i = 0; i < n; i++) {
-      this.blobs.set(`${id}/${i}`, buf.slice(i * CHUNK, (i + 1) * CHUNK))
+      this.blobs.set(`${id}/${i}`, bytesToB64(buf.subarray(i * CHUNK, (i + 1) * CHUNK)))
       onProgress?.((i + 1) / n)
       if (i % 16 === 0) await new Promise(r => setTimeout(r))
     }
@@ -113,13 +138,13 @@ export class Store {
     })
   }
 
-  // reassemble bytes; null if any chunk hasn't synced yet
+  // reassemble bytes from base64 chunks; null if any chunk hasn't synced yet
   getBytes(id) {
     const f = this.meta.get(id); if (!f) return null
     const parts = []
     for (let i = 0; i < f.chunks; i++) {
-      const c = this.blobs.get(`${id}/${i}`); if (!c) return null
-      parts.push(c)
+      const c = this.blobs.get(`${id}/${i}`); if (c == null) return null
+      parts.push(b64ToBytes(c))
     }
     const out = new Uint8Array(parts.reduce((a, c) => a + c.length, 0))
     let o = 0; for (const c of parts) { out.set(c, o); o += c.length }
