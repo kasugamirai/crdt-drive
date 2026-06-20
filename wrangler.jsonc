@@ -1,0 +1,14 @@
+{
+  // Static SPA deploy: serve the Vite build output (dist/) as Workers static
+  // assets. No Worker script / runtime needed — the app is fully client-side
+  // and talks to an external WebSocket. Having this file makes `wrangler deploy`
+  // use it directly and skip the interactive auto-setup wizard (which fails in
+  // CI when vite.config.js has no `plugins` array).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "crdt-drive",
+  "compatibility_date": "2026-06-20",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
