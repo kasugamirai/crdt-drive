@@ -20,7 +20,7 @@ import { deriveKey, encryptBytes, decryptBytes, encryptToB64, decryptFromB64 } f
 
 const CHUNK = 64 * 1024          // 64KB raw per chunk
 const SHARD_RAW = 6 * 1024 * 1024 // ≤6MB raw per shard room (≈8MB base64, safely under the ~12MB ceiling)
-const DL_CONCURRENCY = 4         // how many shard rooms to download in parallel
+const CONCURRENCY = 10           // how many shard rooms to transfer in parallel (up & down)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 export class Store {
@@ -138,12 +138,21 @@ export class Store {
     const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.round(performance.now())}`
     const buf = new Uint8Array(await file.arrayBuffer())
     const shards = Math.max(1, Math.ceil(buf.length / SHARD_RAW))
-    let done = 0
-    for (let k = 0; k < shards; k++) {
-      const slice = buf.subarray(k * SHARD_RAW, (k + 1) * SHARD_RAW)
-      await this._writeShard(this._shardName(id, k), slice, p => onProgress?.((done + p * slice.length) / (buf.length || 1)))
-      done += slice.length
+    const total = buf.length || 1
+    const prog = new Array(shards).fill(0)
+    const report = () => onProgress?.(prog.reduce((a, b) => a + b, 0) / total)
+    let next = 0
+    const worker = async () => {
+      while (true) {
+        const k = next++
+        if (k >= shards) return
+        const slice = buf.subarray(k * SHARD_RAW, (k + 1) * SHARD_RAW)
+        await this._writeShard(this._shardName(id, k), slice, p => { prog[k] = p * slice.length; report() })
+        prog[k] = slice.length; report()
+      }
     }
+    // a thrown shard rejects Promise.all → upload throws → metadata never written (no partial file)
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, shards) }, worker))
     const type = file.type || 'application/octet-stream'
     const enc = await encryptToB64(this.key, JSON.stringify({ name: file.name, type }))
     this.namePlain.set(id, { name: file.name, type })
@@ -186,7 +195,7 @@ export class Store {
         onProgress?.(++done / shards)
       }
     }
-    await Promise.all(Array.from({ length: Math.min(DL_CONCURRENCY, shards) }, worker))
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, shards) }, worker))
     if (failed) return null
     const out = new Uint8Array(results.reduce((a, c) => a + c.length, 0))
     let o = 0; for (const c of results) { out.set(c, o); o += c.length }
