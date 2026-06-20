@@ -3,12 +3,16 @@ import { Store } from './store.js'
 import { initPreview, openPreview, canPreview } from './preview.js'
 import { fmt, esc, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
 
-const WS_URL = 'wss://ws.flow.dev.reearth.io'  // verified-working CRDT link
+const WS_PRESETS = [
+  { label: 'Test · ws.flow.test.reearth.dev', url: 'wss://ws.flow.test.reearth.dev' },
+  { label: 'Dev · ws.flow.dev.reearth.io', url: 'wss://ws.flow.dev.reearth.io' },
+]
 const TOKEN = 'netdisk'                          // server does not validate
 const DEFAULT_ROOM = 'netdisk-public-room'
 
 const $ = id => document.getElementById(id)
-const store = new Store(WS_URL, TOKEN)
+const savedWs = localStorage.getItem('crdt-ws')
+const store = new Store(savedWs || WS_PRESETS[0].url, TOKEN)
 
 // app state
 const state = { cwd: '', search: '', cat: 'all' }
@@ -33,6 +37,31 @@ function connect(room) {
   $('room').value = room
   location.hash = 'room=' + encodeURIComponent(room)
   renderChips()
+}
+
+// ---------- WS server switcher ----------
+function buildServerSelect() {
+  const sel = $('server'); sel.innerHTML = ''
+  for (const p of WS_PRESETS) {
+    const o = document.createElement('option'); o.value = p.url; o.textContent = p.label; sel.appendChild(o)
+  }
+  const custom = document.createElement('option'); custom.value = '__custom__'; custom.textContent = '自定义…'; sel.appendChild(custom)
+  if (WS_PRESETS.some(p => p.url === store.wsUrl)) {
+    sel.value = store.wsUrl
+  } else { // current url is a custom one
+    custom.value = store.wsUrl; custom.textContent = '自定义:' + store.wsUrl; sel.value = store.wsUrl
+  }
+  sel.onchange = () => {
+    let url = sel.value
+    if (url === '__custom__') { url = (prompt('输入 WebSocket 服务器地址 (wss://…)', store.wsUrl) || '').trim(); if (!url) return buildServerSelect() }
+    setServer(url)
+  }
+}
+function setServer(url) {
+  store.wsUrl = url
+  localStorage.setItem('crdt-ws', url)
+  buildServerSelect()
+  connect(store.room || roomFromUrl())   // reconnect current room on the new server
 }
 
 // ---------- rendering ----------
@@ -189,6 +218,7 @@ function setBar(p) { $('bar').firstElementChild.style.width = Math.round(p * 100
 function init() {
   initPreview()
   renderChips()
+  buildServerSelect()
 
   const drop = $('drop'), fileInput = $('file'), folderInput = $('folder')
   drop.onclick = () => fileInput.click()

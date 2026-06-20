@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CRDT Drive · 实时协同网盘</title>
-  <script type="module" crossorigin src="./assets/index-B2vxKZsh.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DbFtY0mB.css">
+  <script type="module" crossorigin src="./assets/index-C9hQLD7X.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BYb7PTyl.css">
 </head>
 <body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
 
@@ -37,6 +37,12 @@
       </div>
       <button id="switch" class="btn-ghost">切换网盘</button>
       <button id="share" class="btn-ghost">🔗 复制分享链接</button>
+    </div>
+
+    <!-- ws server switcher -->
+    <div class="mt-2.5 flex flex-wrap items-center gap-2.5">
+      <span class="text-xs text-slate-500">同步服务器</span>
+      <select id="server" class="input min-w-[260px] cursor-pointer"></select>
     </div>
 
     <!-- toolbar: breadcrumb + search -->
