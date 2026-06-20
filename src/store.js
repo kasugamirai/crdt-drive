@@ -1,30 +1,27 @@
-// CRDT data layer: wraps the Yjs doc + y-websocket provider and exposes
-// file/folder operations. Storage schema in the shared doc:
-//   files: Y.Map  id -> { name, size, type, time, chunks, dir }
-//   dirs:  Y.Map  dirPath -> { time }            (explicit folders, incl. empty)
-//   blobs: Y.Map  `${id}/${i}` -> Uint8Array     (64KB chunks)
+// CRDT data layer (multi-room sharding).
+//
+// The sync service's persistence has two hard limits we design around:
+//   1. It cannot store binary (Uint8Array) — a doc containing any comes back EMPTY
+//      after reload. So file bytes are stored as base64 STRINGS.
+//   2. A persisted doc has a total-size ceiling (~12MB of base64).
+//
+// So a file's bytes are split into SHARDS, each kept in its OWN room (doc), sized
+// under the ceiling. The main "drive" room holds only small metadata, so the file
+// LIST always reloads (refresh never clears it). Large files are uploaded /
+// downloaded shard-by-shard: connect a shard room → transfer → disconnect → next.
+//
+// Drive room:  files: Y.Map  id -> { name, size, type, time, dir, shards }
+//              dirs:  Y.Map  dirPath -> { time }
+// Shard room `${drive}::${id}::${k}`:  blobs: Y.Map  "i" -> base64(64KB chunk)
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
-import { parentPath, pathJoin } from './util.js'
+import { parentPath, pathJoin, bytesToB64, b64ToBytes } from './util.js'
+import { deriveKey, encryptBytes, decryptBytes, encryptToB64, decryptFromB64 } from './crypto.js'
 
-const CHUNK = 64 * 1024
-// The sync service's persistence cannot store binary (Uint8Array) values — a doc
-// containing any breaks reload and the whole room comes back empty after everyone
-// disconnects. So file bytes are stored as base64 STRINGS, which persist correctly.
-// Persisted docs also have a total-size ceiling (~12MB of base64); keep a margin.
-const DURABLE_BUDGET = 9 * 1024 * 1024 // max raw bytes per room (≈12MB base64)
-
-function bytesToB64(bytes) {
-  let bin = ''
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
-  return btoa(bin)
-}
-function b64ToBytes(b64) {
-  const bin = atob(b64)
-  const out = new Uint8Array(bin.length)
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-  return out
-}
+const CHUNK = 64 * 1024          // 64KB raw per chunk
+const SHARD_RAW = 6 * 1024 * 1024 // ≤6MB raw per shard room (≈8MB base64, safely under the ~12MB ceiling)
+const DL_CONCURRENCY = 4         // how many shard rooms to download in parallel
+const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 export class Store {
   constructor(wsUrl, token) {
@@ -41,19 +38,59 @@ export class Store {
     if (this.provider) { this.provider.destroy(); this.doc.destroy() }
     this.room = room
     this.doc = new Y.Doc()
-    this.meta  = this.doc.getMap('files')
-    this.dirs  = this.doc.getMap('dirs')
-    this.blobs = this.doc.getMap('blobs')
+    this.meta = this.doc.getMap('files')
+    this.dirs = this.doc.getMap('dirs')
+    this.namePlain = new Map()              // id -> { name, type } (decrypted, cached)
+    this.keyReady = deriveKey(room).then(k => (this.key = k))
 
     this.provider = new WebsocketProvider(this.wsUrl, room, this.doc, { params: { token: this.token } })
     this.provider.on('status', e => this.emit('status', e.status))
     this.provider.awareness.setLocalState({ t: Date.now() })
     this.provider.awareness.on('change', () => this.emit('online', this.provider.awareness.getStates().size))
 
-    this.meta.observe(() => this.emit('change'))
+    this.meta.observe(() => this._decryptNames())
     this.dirs.observe(() => this.emit('change'))
-    this.emit('change')
+    this._decryptNames()
   }
+
+  // Decrypt file names/types for any new metadata entries into namePlain, then
+  // trigger a re-render. Keeps the query/render path synchronous.
+  async _decryptNames() {
+    await this.keyReady
+    let added = false
+    for (const [id, m] of this.meta.entries()) {
+      if (this.namePlain.has(id)) continue
+      try {
+        if (m.enc) this.namePlain.set(id, JSON.parse(await decryptFromB64(this.key, m.enc)))
+        else this.namePlain.set(id, { name: m.name || '未命名', type: m.type || '' }) // legacy plaintext
+      } catch { this.namePlain.set(id, { name: '🔒 无法解密', type: '' }) }
+      added = true
+    }
+    for (const id of [...this.namePlain.keys()]) if (!this.meta.has(id)) this.namePlain.delete(id)
+    this.emit('change')
+    return added
+  }
+
+  // ---- shard-room helpers ----
+  _shardName(id, k) { return `${this.room}::${id}::${k}` }
+
+  _openRoom(name) {
+    const doc = new Y.Doc()
+    const provider = new WebsocketProvider(this.wsUrl, name, doc, { params: { token: this.token }, disableBc: true })
+    const ready = new Promise(res => provider.once('sync', res))
+    return { doc, provider, ready, blobs: doc.getMap('blobs') }
+  }
+
+  // wait until the outgoing ws buffer drains, then give the server time to persist
+  async _flush(provider) {
+    for (let i = 0; i < 200; i++) {
+      const ws = provider.ws
+      if (ws && ws.bufferedAmount === 0 && provider.synced) break
+      await sleep(50)
+    }
+    await sleep(1500)
+  }
+  _close(r) { r.provider.destroy(); r.doc.destroy() }
 
   // ---- queries ----
   allFolderPaths() {
@@ -71,18 +108,22 @@ export class Store {
       .sort((a, b) => a.name.localeCompare(b.name))
     const files = [...this.meta.entries()]
       .filter(([, f]) => (f.dir || '') === cwd)
-      .map(([id, f]) => ({ id, ...f }))
+      .map(([id, f]) => this._withName(id, f))
       .sort((a, b) => b.time - a.time)
     return { folders, files }
   }
 
-  allFiles() {
-    return [...this.meta.entries()].map(([id, f]) => ({ id, ...f })).sort((a, b) => b.time - a.time)
+  // merge decrypted name/type onto a metadata entry
+  _withName(id, f) {
+    const p = this.namePlain.get(id) || { name: '🔒 解密中…', type: f.type || '' }
+    return { id, ...f, name: p.name, type: p.type }
   }
 
-  totalSize() {
-    let t = 0; for (const [, f] of this.meta) t += f.size; return t
+  allFiles() {
+    return [...this.meta.entries()].map(([id, f]) => this._withName(id, f)).sort((a, b) => b.time - a.time)
   }
+
+  totalSize() { let t = 0; for (const [, f] of this.meta) t += f.size; return t }
 
   // ---- mutations ----
   createFolder(cwd, name) {
@@ -90,69 +131,115 @@ export class Store {
     if (path) this.dirs.set(path, { time: Date.now() })
   }
 
-  // remaining durable budget (raw bytes) before the room hits the persistence ceiling
-  remainingBudget() { return DURABLE_BUDGET - this.totalSize() }
-
-  // upload one File into `dir`. onProgress(0..1). Chunks stored as base64 strings
-  // (binary doesn't survive server persistence); meta written last so peers see
-  // complete data first. Throws if it would exceed the durable budget.
+  // Upload one File into `dir`. Splits into shard rooms; metadata written last so
+  // peers only see the file once every shard is persisted. onProgress(0..1).
   async upload(file, dir, onProgress) {
-    if (file.size > this.remainingBudget()) {
-      const e = new Error(`容量不足:本网盘可持久化总量约 ${Math.round(DURABLE_BUDGET / 1024 / 1024)}MB,「${file.name}」放不下`)
-      e.code = 'BUDGET'; throw e
-    }
+    await this.keyReady
     const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.round(performance.now())}`
     const buf = new Uint8Array(await file.arrayBuffer())
-    const n = Math.ceil(buf.length / CHUNK)
-    for (let i = 0; i < n; i++) {
-      this.blobs.set(`${id}/${i}`, bytesToB64(buf.subarray(i * CHUNK, (i + 1) * CHUNK)))
-      onProgress?.((i + 1) / n)
-      if (i % 16 === 0) await new Promise(r => setTimeout(r))
+    const shards = Math.max(1, Math.ceil(buf.length / SHARD_RAW))
+    let done = 0
+    for (let k = 0; k < shards; k++) {
+      const slice = buf.subarray(k * SHARD_RAW, (k + 1) * SHARD_RAW)
+      await this._writeShard(this._shardName(id, k), slice, p => onProgress?.((done + p * slice.length) / (buf.length || 1)))
+      done += slice.length
     }
-    this.meta.set(id, {
-      name: file.name, size: buf.length,
-      type: file.type || 'application/octet-stream',
-      time: Date.now(), chunks: n, dir: dir || ''
-    })
+    const type = file.type || 'application/octet-stream'
+    const enc = await encryptToB64(this.key, JSON.stringify({ name: file.name, type }))
+    this.namePlain.set(id, { name: file.name, type })
+    this.meta.set(id, { enc, size: buf.length, time: Date.now(), dir: dir || '', shards })
     return id
+  }
+
+  // write one shard room; each 64KB chunk is AES-GCM encrypted before base64
+  async _writeShard(name, bytes, onProgress) {
+    const r = this._openRoom(name)
+    await r.ready
+    const n = Math.ceil(bytes.length / CHUNK)
+    for (let i = 0; i < n; i++) {
+      const ct = await encryptBytes(this.key, bytes.subarray(i * CHUNK, (i + 1) * CHUNK))
+      r.blobs.set(String(i), bytesToB64(ct))
+      if (i % 8 === 0) { onProgress?.(i / n); await sleep(0) }
+    }
+    onProgress?.(1)
+    await this._flush(r.provider)
+    this._close(r)
+  }
+
+  // Read a whole file by downloading its shard rooms in parallel (up to
+  // DL_CONCURRENCY at once), reassembling them in order. onProgress(0..1).
+  // Returns Uint8Array, or null if a shard is missing / still syncing.
+  async readFile(id, onProgress) {
+    const f = this.meta.get(id); if (!f) return null
+    if (!f.size) return new Uint8Array(0)
+    await this.keyReady
+    const shards = f.shards ?? 1
+    const results = new Array(shards)
+    let next = 0, done = 0, failed = false
+    const worker = async () => {
+      while (!failed) {
+        const k = next++            // synchronous claim, no race between awaits
+        if (k >= shards) return
+        const bytes = await this._readShard(id, k)
+        if (bytes == null) { failed = true; return }
+        results[k] = bytes
+        onProgress?.(++done / shards)
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(DL_CONCURRENCY, shards) }, worker))
+    if (failed) return null
+    const out = new Uint8Array(results.reduce((a, c) => a + c.length, 0))
+    let o = 0; for (const c of results) { out.set(c, o); o += c.length }
+    return out
+  }
+
+  // download a single shard room → Uint8Array (null if empty / not synced)
+  async _readShard(id, k) {
+    const r = this._openRoom(this._shardName(id, k))
+    try {
+      await r.ready
+      await sleep(300)
+      const keys = [...r.blobs.keys()].map(Number).sort((a, b) => a - b)
+      if (keys.length === 0) return null
+      const parts = []
+      for (const i of keys) parts.push(await decryptBytes(this.key, b64ToBytes(r.blobs.get(String(i)))))
+      const out = new Uint8Array(parts.reduce((a, c) => a + c.length, 0))
+      let o = 0; for (const c of parts) { out.set(c, o); o += c.length }
+      return out
+    } finally {
+      this._close(r)
+    }
+  }
+
+  async readBlob(id, onProgress) {
+    const f = this.meta.get(id)
+    const bytes = await this.readFile(id, onProgress)
+    return bytes ? new Blob([bytes], { type: f.type }) : null
   }
 
   deleteFile(id) {
     const f = this.meta.get(id); if (!f) return
-    this.doc.transact(() => {
-      for (let i = 0; i < f.chunks; i++) this.blobs.delete(`${id}/${i}`)
-      this.meta.delete(id)
-    })
+    this.meta.delete(id)                       // instant UI removal for everyone
+    this._wipeShards(id, f.shards ?? 1)        // best-effort cleanup of shard rooms
+  }
+
+  async _wipeShards(id, shards) {
+    for (let k = 0; k < shards; k++) {
+      try {
+        const r = this._openRoom(this._shardName(id, k)); await r.ready
+        r.doc.transact(() => { for (const key of [...r.blobs.keys()]) r.blobs.delete(key) })
+        await this._flush(r.provider); this._close(r)
+      } catch { /* best effort */ }
+    }
   }
 
   deleteFolder(path) {
     const under = p => p === path || p.startsWith(path + '/')
+    const victims = [...this.meta.entries()].filter(([, f]) => under(f.dir || ''))
     this.doc.transact(() => {
-      for (const [id, f] of [...this.meta.entries()]) {
-        if (under(f.dir || '')) {
-          for (let i = 0; i < f.chunks; i++) this.blobs.delete(`${id}/${i}`)
-          this.meta.delete(id)
-        }
-      }
+      for (const [id] of victims) this.meta.delete(id)
       for (const key of [...this.dirs.keys()]) if (under(key)) this.dirs.delete(key)
     })
-  }
-
-  // reassemble bytes from base64 chunks; null if any chunk hasn't synced yet
-  getBytes(id) {
-    const f = this.meta.get(id); if (!f) return null
-    const parts = []
-    for (let i = 0; i < f.chunks; i++) {
-      const c = this.blobs.get(`${id}/${i}`); if (c == null) return null
-      parts.push(b64ToBytes(c))
-    }
-    const out = new Uint8Array(parts.reduce((a, c) => a + c.length, 0))
-    let o = 0; for (const c of parts) { out.set(c, o); o += c.length }
-    return out
-  }
-
-  getBlob(id) {
-    const f = this.meta.get(id); const bytes = this.getBytes(id)
-    return bytes ? new Blob([bytes], { type: f.type }) : null
+    for (const [id, f] of victims) this._wipeShards(id, f.shards ?? 1)
   }
 }

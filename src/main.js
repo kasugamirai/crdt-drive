@@ -118,9 +118,13 @@ function fileRow(f, showPath) {
   return tr
 }
 
-function downloadFile(f) {
-  const blob = store.getBlob(f.id)
-  if (!blob) { alert('文件还在同步中,请稍候再试'); return }
+async function downloadFile(f) {
+  showBar(true)
+  let blob
+  try { blob = await store.readBlob(f.id, p => setBar(p)) }
+  catch (e) { showBar(false); alert(`下载失败:${e.message}`); return }
+  showBar(false)
+  if (!blob) { alert('文件还在同步中或分片缺失,请稍候再试'); return }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = f.name; a.click()
   setTimeout(() => URL.revokeObjectURL(url), 4000)
@@ -170,7 +174,7 @@ async function uploadMany(files, baseDir, useRelative) {
     try {
       await store.upload(file, dir, p => setBar((done + p) / files.length))
     } catch (e) {
-      alert(e.code === 'BUDGET' ? e.message : `上传「${file.name}」失败:${e.message}`)
+      alert(`上传「${file.name}」失败:${e.message}`)
       break
     }
     done++

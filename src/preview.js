@@ -6,18 +6,23 @@ function cleanup() { if (curUrl) { URL.revokeObjectURL(curUrl); curUrl = null } 
 
 export function canPreview(file) { return !!previewKind(file.type, file.name) }
 
-export function openPreview(store, file) {
+export async function openPreview(store, file) {
   const kind = previewKind(file.type, file.name)
   const modal = document.getElementById('modal')
   const body = document.getElementById('modal-body')
   const title = document.getElementById('modal-title')
   const LOADING = 'p-10 text-sm text-slate-400'
   title.textContent = file.name
-  body.innerHTML = `<div class="${LOADING}">加载中…</div>`
+  body.innerHTML = `<div class="${LOADING}">加载中… <span id="pv-pct">0%</span></div>`
   modal.classList.remove('hidden'); modal.classList.add('flex')
 
-  const bytes = store.getBytes(file.id)
-  if (!bytes) { body.innerHTML = `<div class="${LOADING}">文件还在同步中，请稍候再试</div>`; return }
+  let bytes
+  try {
+    bytes = await store.readFile(file.id, p => {
+      const el = document.getElementById('pv-pct'); if (el) el.textContent = Math.round(p * 100) + '%'
+    })
+  } catch (e) { body.innerHTML = `<div class="${LOADING}">加载失败：${esc(e.message)}</div>`; return }
+  if (!bytes) { body.innerHTML = `<div class="${LOADING}">文件还在同步中或分片缺失，请稍候再试</div>`; return }
   cleanup()
   curUrl = URL.createObjectURL(new Blob([bytes], { type: file.type }))
 
