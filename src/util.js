@@ -22,6 +22,15 @@ export function esc(s) {
   const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML
 }
 
+export function fmtDuration(sec) {
+  sec = Math.max(0, Math.round(sec))
+  if (sec < 60) return `${sec} 秒`
+  const m = Math.floor(sec / 60), s = sec % 60
+  if (m < 60) return s ? `${m} 分 ${s} 秒` : `${m} 分`
+  const h = Math.floor(m / 60)
+  return `${h} 时 ${m % 60} 分`
+}
+
 // ---- path helpers. paths use "/" separator, no leading slash, root = "" ----
 export const pathJoin = (a, b) => (a ? a + '/' + b : b)
 export const parentPath = (p) => { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i) }

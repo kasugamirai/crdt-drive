@@ -1,7 +1,7 @@
 import './style.css'
 import { Store } from './store.js'
 import { initPreview, openPreview, canPreview } from './preview.js'
-import { fmt, esc, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
+import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
 
 const WS_PRESETS = [
   { label: 'Test · ws.flow.test.reearth.dev', url: 'wss://ws.flow.test.reearth.dev' },
@@ -148,16 +148,37 @@ function fileRow(f, showPath) {
 }
 
 async function downloadFile(f) {
-  showBar(true)
+  dlShow(f.name)
+  const start = performance.now()
   let blob
-  try { blob = await store.readBlob(f.id, p => setBar(p)) }
-  catch (e) { showBar(false); alert(`下载失败:${e.message}`); return }
-  showBar(false)
+  try { blob = await store.readBlob(f.id, p => dlUpdate(p, start, f.size)) }
+  catch (e) { dlHide(); alert(`下载失败:${e.message}`); return }
+  dlHide()
   if (!blob) { alert('文件还在同步中或分片缺失,请稍候再试'); return }
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a'); a.href = url; a.download = f.name; a.click()
   setTimeout(() => URL.revokeObjectURL(url), 4000)
 }
+
+// ---------- download progress toast ----------
+function dlShow(name) {
+  $('dl-name').textContent = name
+  $('dl-pct').textContent = '0%'
+  $('dl-bar').style.width = '0%'
+  $('dl-eta').textContent = '准备中…'
+  $('dl-toast').classList.remove('hidden')
+}
+function dlUpdate(p, start, size) {
+  const pct = Math.round(p * 100)
+  $('dl-pct').textContent = pct + '%'
+  $('dl-bar').style.width = pct + '%'
+  const elapsed = (performance.now() - start) / 1000
+  if (p > 0 && elapsed > 0.3) {
+    const speed = (p * size) / elapsed                 // bytes/s
+    $('dl-eta').textContent = `${fmt(speed)}/s · 剩余约 ${fmtDuration((1 - p) * size / speed)}`
+  }
+}
+function dlHide() { $('dl-toast').classList.add('hidden') }
 
 function renderBreadcrumb() {
   const bc = $('breadcrumb'); bc.innerHTML = ''

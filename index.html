@@ -93,6 +93,19 @@
     <p class="mt-6 text-center text-xs text-slate-600">基于 CRDT 的端到端实时同步 · 多人同时在线无冲突合并</p>
   </main>
 
+  <!-- download progress toast -->
+  <div id="dl-toast" class="fixed bottom-5 right-5 z-40 hidden w-80 max-w-[90vw] rounded-2xl border border-white/10 bg-slate-900/95 p-4 shadow-2xl backdrop-blur">
+    <div class="flex items-center gap-2">
+      <span class="text-lg">⬇️</span>
+      <span id="dl-name" class="flex-1 truncate text-sm font-medium"></span>
+      <span id="dl-pct" class="text-xs font-semibold text-brand-400">0%</span>
+    </div>
+    <div class="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white/10">
+      <div id="dl-bar" class="h-full w-0 bg-brand-500 transition-[width] duration-200"></div>
+    </div>
+    <div id="dl-eta" class="mt-2 text-xs text-slate-500"></div>
+  </div>
+
   <!-- preview modal -->
   <div id="modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-6 backdrop-blur-sm">
     <div class="flex max-h-[90vh] max-w-[92vw] flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
