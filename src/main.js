@@ -5,6 +5,7 @@ import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGOR
 
 const WS_PRESETS = [
   { label: 'Prod · ws.flow.reearth.io', url: 'wss://ws.flow.reearth.io' },
+  { label: 'PLATEAU · ws.flow.plateau.reearth.io', url: 'wss://ws.flow.plateau.reearth.io' },
   { label: 'Test · ws.flow.test.reearth.dev', url: 'wss://ws.flow.test.reearth.dev' },
   { label: 'Dev · ws.flow.dev.reearth.io', url: 'wss://ws.flow.dev.reearth.io' },
 ]
