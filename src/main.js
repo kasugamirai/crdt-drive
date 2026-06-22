@@ -5,13 +5,8 @@ import { initMedia } from './media.js'
 import { watchTarget, runWatch, shareWatchUrl } from './watch.js'
 import { ensureThumb, getThumb } from './thumb.js'
 import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
+import { WS_PRESETS, encodeRelay } from './servers.js'
 
-const WS_PRESETS = [
-  { label: 'PLATEAU · ws.flow.plateau.reearth.io', url: 'wss://ws.flow.plateau.reearth.io' },
-  { label: 'Prod · ws.flow.reearth.io', url: 'wss://ws.flow.reearth.io' },
-  { label: 'Test · ws.flow.test.reearth.dev', url: 'wss://ws.flow.test.reearth.dev' },
-  { label: 'Dev · ws.flow.dev.reearth.io', url: 'wss://ws.flow.dev.reearth.io' },
-]
 const TOKEN = 'netdisk'                          // server does not validate
 const DEFAULT_ROOM = 'netdisk-public-room'
 
@@ -115,13 +110,12 @@ function folderCard(folder) {
   const card = document.createElement('div')
   card.className = 'card group cursor-pointer'
   card.innerHTML = `
-    <div class="thumb text-5xl">📁
-      <div class="card-actions"><button class="card-act del" title="删除文件夹">🗑</button></div>
-    </div>
+    <div class="thumb text-5xl">📁</div>
     <div class="px-3 py-2">
       <div class="fname truncate text-sm font-medium"></div>
       <div class="mt-0.5 text-xs text-slate-500">文件夹</div>
-    </div>`
+    </div>
+    <div class="card-foot"><button class="card-act del" title="删除文件夹">🗑</button></div>`
   card.querySelector('.fname').textContent = folder.name
   card.querySelector('.fname').title = folder.name
   card.onclick = () => { state.cwd = folder.path; render() }
@@ -145,18 +139,18 @@ function fileCard(f, showPath) {
     <div class="thumb${can ? ' cursor-pointer' : ''}">
       <span class="ph">${CATEGORY_ICON[cat]}</span>
       ${cat === 'video' ? '<span class="play-badge">▶</span>' : ''}
-      <div class="card-actions">
-        ${can ? '<button class="card-act pv" title="预览/在线播放">👁</button>' : ''}
-        ${canShare ? '<button class="card-act share" title="复制在线观看链接">🔗</button>' : ''}
-        <button class="card-act dl" title="下载">⬇</button>
-        <button class="card-act del" title="删除">🗑</button>
-      </div>
     </div>
     <div class="px-3 py-2">
       <div class="fname truncate text-sm font-medium"></div>
       <div class="mt-0.5 truncate text-xs text-slate-500">
         ${fmt(f.size)} · ${new Date(f.time).toLocaleDateString()}${showPath ? ' · <span class="path"></span>' : ''}
       </div>
+    </div>
+    <div class="card-foot">
+      ${can ? '<button class="card-act pv" title="预览 / 在线播放">👁</button>' : ''}
+      ${canShare ? '<button class="card-act share" title="分享在线观看链接">🔗</button>' : ''}
+      <button class="card-act dl" title="下载">⬇</button>
+      <button class="card-act del" title="删除">🗑</button>
     </div>`
 
   const nameEl = card.querySelector('.fname')
@@ -174,15 +168,58 @@ function fileCard(f, showPath) {
 
   card.querySelector('.pv')?.addEventListener('click', e => { e.stopPropagation(); openPreview(store, f) })
   const sh = card.querySelector('.share')
-  if (sh) sh.onclick = async e => {
-    e.stopPropagation()
-    const link = shareWatchUrl(store.room, f.id)
-    try { await navigator.clipboard.writeText(link); sh.textContent = '✅'; setTimeout(() => sh.textContent = '🔗', 1500) }
-    catch { prompt('复制此链接分享,对方可在线观看:', link) }
-  }
+  if (sh) sh.onclick = e => { e.stopPropagation(); openShareDialog(f) }
   card.querySelector('.dl').onclick = e => { e.stopPropagation(); downloadFile(f) }
   card.querySelector('.del').onclick = e => { e.stopPropagation(); if (confirm(`删除「${f.name}」?所有人都将看不到。`)) store.deleteFile(f.id) }
   return card
+}
+
+// Share dialog: pick which relay (sync server) to embed so the link is self-contained.
+function openShareDialog(f) {
+  const presets = [...WS_PRESETS]
+  if (!presets.some(p => p.url === store.wsUrl)) presets.unshift({ label: '自定义', url: store.wsUrl })
+
+  const overlay = document.createElement('div')
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm'
+  overlay.innerHTML = `
+    <div class="w-full max-w-lg rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+      <div class="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <h3 class="sd-title flex-1 truncate text-sm font-semibold"></h3>
+        <button class="sd-close grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10">✕</button>
+      </div>
+      <div class="space-y-2.5 p-4">
+        <label class="block text-xs text-slate-400">中转(relay)服务器 — 对方将通过它连接观看</label>
+        <select class="sd-relay input w-full cursor-pointer"></select>
+        <label class="block pt-1 text-xs text-slate-400">分享链接</label>
+        <textarea class="sd-link input h-20 w-full resize-none break-all font-mono text-xs leading-relaxed" readonly></textarea>
+        <div class="flex justify-end gap-2 pt-1"><button class="sd-copy btn">📋 复制链接</button></div>
+        <p class="text-[11px] leading-relaxed text-slate-500">链接已内置中转服务器,对方无需手动切换。任何拿到链接的人都可在线观看(解密密钥由房间名推导)。</p>
+      </div>
+    </div>`
+  document.body.appendChild(overlay)
+  overlay.querySelector('.sd-title').textContent = `🔗 分享「${f.name}」`
+
+  const sel = overlay.querySelector('.sd-relay')
+  const none = document.createElement('option'); none.value = ''; none.textContent = '(不指定,使用对方默认服务器)'; sel.appendChild(none)
+  for (const p of presets) { const o = document.createElement('option'); o.value = p.url; o.textContent = p.label.split(' · ')[0]; sel.appendChild(o) }
+  sel.value = store.wsUrl                       // default: the server you're on now
+
+  const linkEl = overlay.querySelector('.sd-link')
+  const refresh = () => { linkEl.value = shareWatchUrl(store.room, f.id, sel.value ? encodeRelay(sel.value) : null) }
+  refresh(); sel.onchange = refresh
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey) }
+  const onKey = e => { if (e.key === 'Escape') close() }
+  document.addEventListener('keydown', onKey)
+  overlay.querySelector('.sd-close').onclick = close
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+
+  const copyBtn = overlay.querySelector('.sd-copy')
+  copyBtn.onclick = async () => {
+    try { await navigator.clipboard.writeText(linkEl.value) }
+    catch { linkEl.focus(); linkEl.select() }
+    copyBtn.textContent = '✅ 已复制'; setTimeout(() => copyBtn.textContent = '📋 复制链接', 1500)
+  }
 }
 
 async function downloadFile(f) {

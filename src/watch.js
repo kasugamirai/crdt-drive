@@ -7,20 +7,28 @@
 // (play-while-loading + seeking), falling back to a full download when needed.
 import { initMedia, mediaUrl, streamingAvailable } from './media.js'
 import { previewKind, esc } from './util.js'
+import { decodeRelay } from './servers.js'
 
 const MEDIA = 'max-h-[82vh] max-w-[92vw] rounded-xl shadow-2xl'
 
 // Parse a #watch link, or null for normal app mode.
 export function watchTarget() {
-  const m = location.hash.match(/watch=([^&]+)&v=([^&]+)/)
-  return m ? { room: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]) } : null
+  const h = location.hash
+  const m = h.match(/watch=([^&]+)&v=([^&]+)/)
+  if (!m) return null
+  const r = h.match(/relay=([^&]+)/)
+  return { room: decodeURIComponent(m[1]), id: decodeURIComponent(m[2]), relay: r ? decodeURIComponent(r[1]) : null }
 }
 
-export function shareWatchUrl(room, id) {
-  return `${location.origin}${location.pathname}#watch=${encodeURIComponent(room)}&v=${encodeURIComponent(id)}`
+export function shareWatchUrl(room, id, relay) {
+  let u = `${location.origin}${location.pathname}#watch=${encodeURIComponent(room)}&v=${encodeURIComponent(id)}`
+  if (relay) u += `&relay=${encodeURIComponent(relay)}`
+  return u
 }
 
-export async function runWatch(store, { room, id }) {
+export async function runWatch(store, { room, id, relay }) {
+  const relayUrl = decodeRelay(relay)   // 'test' → wss://…  (custom urls pass through)
+  if (relayUrl) store.wsUrl = relayUrl  // link carries its own sync server → connect there
   initMedia(store)
   store.connect(room)
 
