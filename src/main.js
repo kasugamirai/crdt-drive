@@ -4,7 +4,7 @@ import { initPreview, openPreview, canPreview } from './preview.js'
 import { initMedia } from './media.js'
 import { watchTarget, runWatch, shareWatchUrl } from './watch.js'
 import { ensureThumb, getThumb } from './thumb.js'
-import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
+import { fmt, esc, fmtDuration, bytesToB64, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
 import { WS_PRESETS, encodeRelay } from './servers.js'
 
 const TOKEN = 'netdisk'                          // server does not validate
@@ -130,7 +130,8 @@ function fileCard(f, showPath) {
   const cat = categoryOf(f.type, f.name)
   const pk = previewKind(f.type, f.name)
   const can = !!pk
-  const canShare = pk === 'video' || pk === 'audio'   // streamable online via a share link
+  const canShare = pk === 'video' || pk === 'audio' || pk === 'image'  // shareable online / 图床
+  const shareTitle = pk === 'image' ? '图床 · 复制图片直链 / 链接' : '分享在线观看链接'
   const hasThumb = cat === 'image' || cat === 'video'
 
   const card = document.createElement('div')
@@ -148,7 +149,7 @@ function fileCard(f, showPath) {
     </div>
     <div class="card-foot">
       ${can ? '<button class="card-act pv" title="预览 / 在线播放">👁</button>' : ''}
-      ${canShare ? '<button class="card-act share" title="分享在线观看链接">🔗</button>' : ''}
+      ${canShare ? `<button class="card-act share" title="${shareTitle}">🔗</button>` : ''}
       <button class="card-act dl" title="下载">⬇</button>
       <button class="card-act del" title="删除">🗑</button>
     </div>`
@@ -168,7 +169,7 @@ function fileCard(f, showPath) {
 
   card.querySelector('.pv')?.addEventListener('click', e => { e.stopPropagation(); openPreview(store, f) })
   const sh = card.querySelector('.share')
-  if (sh) sh.onclick = e => { e.stopPropagation(); openShareDialog(f) }
+  if (sh) sh.onclick = e => { e.stopPropagation(); (pk === 'image' ? openImageShare : openShareDialog)(f) }
   card.querySelector('.dl').onclick = e => { e.stopPropagation(); downloadFile(f) }
   card.querySelector('.del').onclick = e => { e.stopPropagation(); if (confirm(`删除「${f.name}」?所有人都将看不到。`)) store.deleteFile(f.id) }
   return card
@@ -220,6 +221,101 @@ function openShareDialog(f) {
     catch { linkEl.focus(); linkEl.select() }
     copyBtn.textContent = '✅ 已复制'; setTimeout(() => copyBtn.textContent = '📋 复制链接', 1500)
   }
+}
+
+// A labelled read-only field with a copy button.
+function copyBlock(label, value) {
+  const wrap = document.createElement('div')
+  wrap.innerHTML = `
+    <div class="mb-1 text-[11px] text-slate-400">${esc(label)}</div>
+    <div class="flex gap-2">
+      <input class="cb-val input flex-1 font-mono text-xs" readonly />
+      <button class="cb-copy btn px-3 shrink-0">复制</button>
+    </div>`
+  wrap.querySelector('.cb-val').value = value
+  const btn = wrap.querySelector('.cb-copy')
+  btn.onclick = async () => {
+    try { await navigator.clipboard.writeText(value) } catch { const i = wrap.querySelector('.cb-val'); i.focus(); i.select() }
+    btn.textContent = '已复制'; setTimeout(() => btn.textContent = '复制', 1200)
+  }
+  return wrap
+}
+
+// 图床: online-view link + a self-contained Data URL (a real portable image
+// source usable in any <img>/Markdown/HTML, no server needed) + embed snippets.
+function openImageShare(f) {
+  const presets = [...WS_PRESETS]
+  if (!presets.some(p => p.url === store.wsUrl)) presets.unshift({ label: '自定义', url: store.wsUrl })
+
+  const overlay = document.createElement('div')
+  overlay.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6 backdrop-blur-sm'
+  overlay.innerHTML = `
+    <div class="flex max-h-[88vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-white/10 bg-slate-900 shadow-2xl">
+      <div class="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <h3 class="is-title flex-1 truncate text-sm font-semibold"></h3>
+        <button class="is-close grid h-8 w-8 place-items-center rounded-lg border border-white/10 bg-white/5 text-slate-300 transition hover:bg-white/10">✕</button>
+      </div>
+      <div class="space-y-3 overflow-auto p-4">
+        <div class="is-prev grid aspect-video place-items-center overflow-hidden rounded-xl border border-white/10 bg-slate-900/50 bg-contain bg-center bg-no-repeat text-xs text-slate-500">预览加载中…</div>
+        <label class="block text-xs text-slate-400">在线查看链接 — 任何人打开即可看图(经所选中转服务器)</label>
+        <select class="is-relay input w-full cursor-pointer"></select>
+        <div class="is-link"></div>
+        <label class="block pt-1 text-xs text-slate-400">图片直链 / 嵌入代码 — 自包含,可贴到任意网页 · Markdown · 论坛</label>
+        <div class="is-direct space-y-2"></div>
+      </div>
+    </div>`
+  document.body.appendChild(overlay)
+  overlay.querySelector('.is-title').textContent = `🖼️ 图床 ·「${f.name}」`
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey) }
+  const onKey = e => { if (e.key === 'Escape') close() }
+  document.addEventListener('keydown', onKey)
+  overlay.querySelector('.is-close').onclick = close
+  overlay.addEventListener('click', e => { if (e.target === overlay) close() })
+
+  // online-view link with relay selector
+  const sel = overlay.querySelector('.is-relay')
+  const none = document.createElement('option'); none.value = ''; none.textContent = '(不指定,使用对方默认服务器)'; sel.appendChild(none)
+  for (const p of presets) { const o = document.createElement('option'); o.value = p.url; o.textContent = p.label.split(' · ')[0]; sel.appendChild(o) }
+  sel.value = store.wsUrl
+  const linkBox = overlay.querySelector('.is-link')
+  const renderLink = () => { linkBox.innerHTML = ''; linkBox.append(copyBlock('链接', shareWatchUrl(store.room, f.id, sel.value ? encodeRelay(sel.value) : null))) }
+  renderLink(); sel.onchange = renderLink
+
+  // preview: use cached thumbnail immediately if we have one
+  const prev = overlay.querySelector('.is-prev')
+  const thumb = getThumb(f.id)
+  if (thumb) { prev.style.backgroundImage = `url("${thumb}")`; prev.textContent = '' }
+
+  // self-contained Data URL + embed codes
+  const direct = overlay.querySelector('.is-direct')
+  const LIMIT = 4 * 1024 * 1024
+  const build = async () => {
+    direct.innerHTML = `<div class="text-xs text-slate-500">生成中…</div>`
+    let bytes
+    try { bytes = await store.readFile(f.id) }
+    catch (e) { direct.innerHTML = `<div class="text-xs text-red-400">生成失败:${esc(e.message)}</div>`; return }
+    if (!bytes) { direct.innerHTML = `<div class="text-xs text-slate-500">分片缺失或还在同步,请稍后重试</div>`; return }
+    const dataUrl = `data:${f.type || 'image/png'};base64,${bytesToB64(bytes)}`
+    if (prev.textContent) { prev.style.backgroundImage = `url("${dataUrl}")`; prev.textContent = '' }
+    direct.innerHTML = ''
+    direct.append(
+      copyBlock('图片直链 (Data URL)', dataUrl),
+      copyBlock('Markdown', `![${f.name}](${dataUrl})`),
+      copyBlock('HTML', `<img src="${dataUrl}" alt="${f.name}">`),
+    )
+    const note = document.createElement('p')
+    note.className = 'text-[11px] leading-relaxed text-slate-500'
+    note.textContent = '直链为自包含 Data URL,可直接粘贴到网页 / Markdown / 论坛显示,无需服务器;体积约为原图 1.33 倍,过大的图片部分平台可能拒绝。'
+    direct.append(note)
+  }
+  if (f.size > LIMIT) {
+    const warn = document.createElement('p'); warn.className = 'text-[11px] text-slate-500'
+    warn.textContent = `图片较大(${fmt(f.size)}),直链会很长。`
+    const btn = document.createElement('button'); btn.className = 'btn'; btn.textContent = '仍要生成图片直链'
+    btn.onclick = build
+    direct.append(warn, btn)
+  } else build()
 }
 
 async function downloadFile(f) {
