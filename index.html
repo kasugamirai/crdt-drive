@@ -73,20 +73,9 @@
     <input id="file" type="file" multiple hidden />
     <input id="folder" type="file" webkitdirectory hidden />
 
-    <!-- file list -->
-    <div class="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[.02]">
-      <table class="w-full border-collapse">
-        <thead>
-          <tr class="text-left text-xs text-slate-500">
-            <th class="px-4 py-3 font-medium">名称</th>
-            <th class="px-4 py-3 font-medium">大小</th>
-            <th class="px-4 py-3 font-medium">类型</th>
-            <th class="px-4 py-3 font-medium">修改时间</th>
-            <th class="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody id="list"></tbody>
-      </table>
+    <!-- file grid -->
+    <div class="mt-5">
+      <div id="list" class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"></div>
       <div id="empty" class="px-4 py-16 text-center text-sm text-slate-500"></div>
     </div>
 

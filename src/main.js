@@ -3,6 +3,7 @@ import { Store } from './store.js'
 import { initPreview, openPreview, canPreview } from './preview.js'
 import { initMedia } from './media.js'
 import { watchTarget, runWatch, shareWatchUrl } from './watch.js'
+import { ensureThumb, getThumb } from './thumb.js'
 import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
 
 const WS_PRESETS = [
@@ -85,8 +86,8 @@ function render() {
 
   const list = $('list'); list.innerHTML = ''
 
-  if (!searching) for (const folder of folders) list.appendChild(folderRow(folder))
-  for (const f of files) list.appendChild(fileRow(f, searching))
+  if (!searching) for (const folder of folders) list.appendChild(folderCard(folder))
+  for (const f of files) list.appendChild(fileCard(f, searching))
 
   const empty = folders.length + files.length === 0
   $('empty').style.display = empty ? 'block' : 'none'
@@ -95,70 +96,93 @@ function render() {
     : '这里还没有内容,上传或新建文件夹吧 👆'
 }
 
-const ROW = 'border-t border-white/5 transition hover:bg-white/[.03]'
-const CELL = 'px-4 py-3 align-middle'
+// Load a card's thumbnail when it scrolls into view (keeps big directories cheap).
+const thumbObserver = new IntersectionObserver(entries => {
+  for (const e of entries) if (e.isIntersecting) { thumbObserver.unobserve(e.target); fillThumb(e.target) }
+}, { rootMargin: '300px' })
 
-function folderRow(folder) {
-  const tr = document.createElement('tr')
-  tr.className = ROW
-  tr.innerHTML = `
-    <td class="${CELL}">
-      <button class="nav flex items-center gap-2 text-left font-medium transition hover:text-brand-400">
-        <span class="text-lg">📁</span><span class="fname break-all"></span>
-      </button>
-    </td>
-    <td class="${CELL} text-slate-500">—</td>
-    <td class="${CELL} text-sm text-slate-500">文件夹</td>
-    <td class="${CELL}"></td>
-    <td class="${CELL} whitespace-nowrap text-right"><button class="iconbtn del hover:text-red-400">删除</button></td>`
-  tr.querySelector('.fname').textContent = folder.name
-  tr.querySelector('.nav').onclick = () => { state.cwd = folder.path; render() }
-  tr.querySelector('.del').onclick = e => {
+function applyThumb(el, url) {
+  el.style.backgroundImage = `url("${url}")`
+  el.classList.add('text-transparent')      // hide the fallback emoji behind the image
+}
+async function fillThumb(el) {
+  const f = el._file; if (!f) return
+  const url = await ensureThumb(store, f)
+  if (url && el.isConnected) applyThumb(el, url)
+}
+
+function folderCard(folder) {
+  const card = document.createElement('div')
+  card.className = 'card group cursor-pointer'
+  card.innerHTML = `
+    <div class="thumb text-5xl">📁
+      <div class="card-actions"><button class="card-act del" title="删除文件夹">🗑</button></div>
+    </div>
+    <div class="px-3 py-2">
+      <div class="fname truncate text-sm font-medium"></div>
+      <div class="mt-0.5 text-xs text-slate-500">文件夹</div>
+    </div>`
+  card.querySelector('.fname').textContent = folder.name
+  card.querySelector('.fname').title = folder.name
+  card.onclick = () => { state.cwd = folder.path; render() }
+  card.querySelector('.del').onclick = e => {
     e.stopPropagation()
     if (confirm(`删除文件夹「${folder.name}」及其中所有内容?`)) store.deleteFolder(folder.path)
   }
-  return tr
+  return card
 }
 
-function fileRow(f, showPath) {
+function fileCard(f, showPath) {
   const cat = categoryOf(f.type, f.name)
-  const tr = document.createElement('tr')
-  tr.className = ROW
   const pk = previewKind(f.type, f.name)
   const can = !!pk
   const canShare = pk === 'video' || pk === 'audio'   // streamable online via a share link
-  const nameInner = `<span class="text-lg">${CATEGORY_ICON[cat]}</span><span class="fname break-all font-medium"></span>${showPath ? '<small class="path text-slate-500"></small>' : ''}`
-  tr.innerHTML = `
-    <td class="${CELL}">
-      ${can
-        ? `<button class="pvname flex items-center gap-2 text-left transition hover:text-brand-400">${nameInner}</button>`
-        : `<div class="flex items-center gap-2">${nameInner}</div>`}
-    </td>
-    <td class="${CELL} text-slate-400">${fmt(f.size)}</td>
-    <td class="${CELL} text-sm text-slate-400">${esc(CATEGORY_LABEL[cat])}</td>
-    <td class="${CELL} text-sm text-slate-500">${new Date(f.time).toLocaleString()}</td>
-    <td class="${CELL} whitespace-nowrap text-right">
-      ${can ? '<button class="iconbtn pv">预览</button>' : ''}
-      ${canShare ? '<button class="iconbtn share">🔗 分享</button>' : ''}
-      <button class="iconbtn dl">下载</button>
-      <button class="iconbtn del hover:text-red-400">删除</button>
-    </td>`
-  tr.querySelector('.fname').textContent = f.name
-  if (showPath) tr.querySelector('.path').textContent = '· ' + (f.dir || '根目录') + '/'
-  if (can) {
-    tr.querySelector('.pvname').onclick = () => openPreview(store, f)
-    tr.querySelector('.pv').onclick = () => openPreview(store, f)
+  const hasThumb = cat === 'image' || cat === 'video'
+
+  const card = document.createElement('div')
+  card.className = 'card group'
+  card.innerHTML = `
+    <div class="thumb${can ? ' cursor-pointer' : ''}">
+      <span class="ph">${CATEGORY_ICON[cat]}</span>
+      ${cat === 'video' ? '<span class="play-badge">▶</span>' : ''}
+      <div class="card-actions">
+        ${can ? '<button class="card-act pv" title="预览/在线播放">👁</button>' : ''}
+        ${canShare ? '<button class="card-act share" title="复制在线观看链接">🔗</button>' : ''}
+        <button class="card-act dl" title="下载">⬇</button>
+        <button class="card-act del" title="删除">🗑</button>
+      </div>
+    </div>
+    <div class="px-3 py-2">
+      <div class="fname truncate text-sm font-medium"></div>
+      <div class="mt-0.5 truncate text-xs text-slate-500">
+        ${fmt(f.size)} · ${new Date(f.time).toLocaleDateString()}${showPath ? ' · <span class="path"></span>' : ''}
+      </div>
+    </div>`
+
+  const nameEl = card.querySelector('.fname')
+  nameEl.textContent = f.name; nameEl.title = f.name
+  if (showPath) card.querySelector('.path').textContent = (f.dir || '根目录')
+
+  const thumb = card.querySelector('.thumb')
+  if (can) thumb.onclick = () => openPreview(store, f)
+  if (hasThumb) {
+    thumb._file = f
+    const cached = getThumb(f.id)
+    if (cached) applyThumb(thumb, cached)            // already built → no flicker
+    else if (cached === undefined) thumbObserver.observe(thumb)  // '' = no thumb, keep icon
   }
-  const sh = tr.querySelector('.share')
-  if (sh) sh.onclick = async () => {
+
+  card.querySelector('.pv')?.addEventListener('click', e => { e.stopPropagation(); openPreview(store, f) })
+  const sh = card.querySelector('.share')
+  if (sh) sh.onclick = async e => {
+    e.stopPropagation()
     const link = shareWatchUrl(store.room, f.id)
-    try { await navigator.clipboard.writeText(link) }
-    catch { prompt('复制此链接分享,对方可在线观看:', link); return }
-    const old = sh.textContent; sh.textContent = '✅ 已复制'; setTimeout(() => sh.textContent = old, 1500)
+    try { await navigator.clipboard.writeText(link); sh.textContent = '✅'; setTimeout(() => sh.textContent = '🔗', 1500) }
+    catch { prompt('复制此链接分享,对方可在线观看:', link) }
   }
-  tr.querySelector('.dl').onclick = () => downloadFile(f)
-  tr.querySelector('.del').onclick = () => { if (confirm(`删除「${f.name}」?所有人都将看不到。`)) store.deleteFile(f.id) }
-  return tr
+  card.querySelector('.dl').onclick = e => { e.stopPropagation(); downloadFile(f) }
+  card.querySelector('.del').onclick = e => { e.stopPropagation(); if (confirm(`删除「${f.name}」?所有人都将看不到。`)) store.deleteFile(f.id) }
+  return card
 }
 
 async function downloadFile(f) {
@@ -255,7 +279,7 @@ function init() {
   if (target) { runWatch(store, target); return }   // shared "watch online" link → dedicated player page
 
   initPreview()
-  initMedia(store)        // register the media-streaming service worker
+  initMedia(store).then(render)   // once streaming is ready, re-render so video thumbnails can build
   renderChips()
   buildServerSelect()
 

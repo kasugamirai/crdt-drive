@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>CRDT Drive · 实时协同网盘</title>
-  <script type="module" crossorigin src="./assets/index-B1decacn.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-BSL51HrM.css">
+  <script type="module" crossorigin src="./assets/index-BQQC810J.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-62RFJs2p.css">
 </head>
 <body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
 
@@ -75,20 +75,9 @@
     <input id="file" type="file" multiple hidden />
     <input id="folder" type="file" webkitdirectory hidden />
 
-    <!-- file list -->
-    <div class="mt-5 overflow-hidden rounded-2xl border border-white/10 bg-white/[.02]">
-      <table class="w-full border-collapse">
-        <thead>
-          <tr class="text-left text-xs text-slate-500">
-            <th class="px-4 py-3 font-medium">名称</th>
-            <th class="px-4 py-3 font-medium">大小</th>
-            <th class="px-4 py-3 font-medium">类型</th>
-            <th class="px-4 py-3 font-medium">修改时间</th>
-            <th class="px-4 py-3"></th>
-          </tr>
-        </thead>
-        <tbody id="list"></tbody>
-      </table>
+    <!-- file grid -->
+    <div class="mt-5">
+      <div id="list" class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5"></div>
       <div id="empty" class="px-4 py-16 text-center text-sm text-slate-500"></div>
     </div>
 
