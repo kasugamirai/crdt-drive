@@ -1,6 +1,8 @@
 import './style.css'
 import { Store } from './store.js'
 import { initPreview, openPreview, canPreview } from './preview.js'
+import { initMedia } from './media.js'
+import { watchTarget, runWatch, shareWatchUrl } from './watch.js'
 import { fmt, esc, fmtDuration, pathJoin, baseName, dirName, categoryOf, CATEGORY_LABEL, CATEGORY_ICON, previewKind } from './util.js'
 
 const WS_PRESETS = [
@@ -122,7 +124,9 @@ function fileRow(f, showPath) {
   const cat = categoryOf(f.type, f.name)
   const tr = document.createElement('tr')
   tr.className = ROW
-  const can = !!previewKind(f.type, f.name)
+  const pk = previewKind(f.type, f.name)
+  const can = !!pk
+  const canShare = pk === 'video' || pk === 'audio'   // streamable online via a share link
   const nameInner = `<span class="text-lg">${CATEGORY_ICON[cat]}</span><span class="fname break-all font-medium"></span>${showPath ? '<small class="path text-slate-500"></small>' : ''}`
   tr.innerHTML = `
     <td class="${CELL}">
@@ -135,6 +139,7 @@ function fileRow(f, showPath) {
     <td class="${CELL} text-sm text-slate-500">${new Date(f.time).toLocaleString()}</td>
     <td class="${CELL} whitespace-nowrap text-right">
       ${can ? '<button class="iconbtn pv">预览</button>' : ''}
+      ${canShare ? '<button class="iconbtn share">🔗 分享</button>' : ''}
       <button class="iconbtn dl">下载</button>
       <button class="iconbtn del hover:text-red-400">删除</button>
     </td>`
@@ -143,6 +148,13 @@ function fileRow(f, showPath) {
   if (can) {
     tr.querySelector('.pvname').onclick = () => openPreview(store, f)
     tr.querySelector('.pv').onclick = () => openPreview(store, f)
+  }
+  const sh = tr.querySelector('.share')
+  if (sh) sh.onclick = async () => {
+    const link = shareWatchUrl(store.room, f.id)
+    try { await navigator.clipboard.writeText(link) }
+    catch { prompt('复制此链接分享,对方可在线观看:', link); return }
+    const old = sh.textContent; sh.textContent = '✅ 已复制'; setTimeout(() => sh.textContent = old, 1500)
   }
   tr.querySelector('.dl').onclick = () => downloadFile(f)
   tr.querySelector('.del').onclick = () => { if (confirm(`删除「${f.name}」?所有人都将看不到。`)) store.deleteFile(f.id) }
@@ -239,7 +251,11 @@ function setBar(p) { $('bar').firstElementChild.style.width = Math.round(p * 100
 
 // ---------- wiring ----------
 function init() {
+  const target = watchTarget()
+  if (target) { runWatch(store, target); return }   // shared "watch online" link → dedicated player page
+
   initPreview()
+  initMedia(store)        // register the media-streaming service worker
   renderChips()
   buildServerSelect()
 

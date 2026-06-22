@@ -41,6 +41,8 @@ export class Store {
     this.meta = this.doc.getMap('files')
     this.dirs = this.doc.getMap('dirs')
     this.namePlain = new Map()              // id -> { name, type } (decrypted, cached)
+    this.shardCache = new Map()             // "id:k" -> Uint8Array (LRU, for range/streaming reads)
+    this.shardInflight = new Map()          // "id:k" -> Promise (dedupe concurrent range reads)
     this.keyReady = deriveKey(room).then(k => (this.key = k))
 
     this.provider = new WebsocketProvider(this.wsUrl, room, this.doc, { params: { token: this.token } })
@@ -225,6 +227,62 @@ export class Store {
     const bytes = await this.readFile(id, onProgress)
     return bytes ? new Blob([bytes], { type: f.type }) : null
   }
+
+  // size/type/name for a file id, used to serve streaming media responses
+  fileInfo(id) {
+    const f = this.meta.get(id); if (!f) return null
+    const p = this.namePlain.get(id) || {}
+    return { size: f.size || 0, type: p.type || f.type || 'application/octet-stream', shards: f.shards ?? 1, name: p.name }
+  }
+
+  // Read the byte range [start, end) of a file (end exclusive), touching only the
+  // shards it spans. Backed by an LRU shard cache so a media player's many small
+  // range requests don't re-download whole shards. Powers play-while-loading.
+  async readRange(id, start, end) {
+    const f = this.meta.get(id); if (!f) return new Uint8Array(0)
+    await this.keyReady
+    const size = f.size || 0
+    end = Math.min(end, size)
+    if (end <= start) return new Uint8Array(0)
+    const first = Math.floor(start / SHARD_RAW)
+    const last = Math.floor((end - 1) / SHARD_RAW)
+    const idxs = []; for (let k = first; k <= last; k++) idxs.push(k)
+    const datas = await Promise.all(idxs.map(k => this._readShardCached(id, k)))
+    const out = new Uint8Array(end - start)
+    let written = 0
+    for (let j = 0; j < idxs.length; j++) {
+      const shard = datas[j]
+      if (!shard) throw new Error('分片缺失')
+      const base = idxs[j] * SHARD_RAW
+      const from = Math.max(start, base) - base
+      const to = Math.min(end, base + shard.length) - base
+      out.set(shard.subarray(from, to), written)
+      written += to - from
+    }
+    return written === out.length ? out : out.slice(0, written)
+  }
+
+  // _readShard with an 8-shard LRU cache + in-flight dedupe
+  _readShardCached(id, k) {
+    const key = id + ':' + k
+    const hit = this.shardCache.get(key)
+    if (hit) { this.shardCache.delete(key); this.shardCache.set(key, hit); return Promise.resolve(hit) }
+    let pending = this.shardInflight.get(key)
+    if (!pending) {
+      pending = this._readShard(id, k).then(bytes => {
+        this.shardInflight.delete(key)
+        if (bytes) {
+          this.shardCache.set(key, bytes)
+          while (this.shardCache.size > 8) this.shardCache.delete(this.shardCache.keys().next().value)
+        }
+        return bytes
+      }, err => { this.shardInflight.delete(key); throw err })
+      this.shardInflight.set(key, pending)
+    }
+    return pending
+  }
+
+  clearMediaCache() { this.shardCache?.clear() }
 
   deleteFile(id) {
     const f = this.meta.get(id); if (!f) return

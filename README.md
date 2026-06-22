@@ -67,8 +67,10 @@ wss://<同步服务>/<doc_id>
 - **实时刷新**:`files.observe` / `dirs.observe` 变化即重渲染;在线人数靠 Yjs 的 **awareness** 协议统计。
 - **搜索**:对全部文件按文件名前端过滤(跨目录),结果显示所在路径。
 - **分类**:按 MIME 类型 + 扩展名归类为 图片/视频/音频/文档/压缩包/其他,做标签过滤。
-- **在线预览**:按类型把 `Blob` 的 object URL 注入 `<img>/<video>/<audio>/<iframe>`,文本类直接解码展示。
+- **在线预览**:图片 / PDF 把 `Blob` 的 object URL 注入 `<img>/<iframe>`,文本类只取前 512KB 解码展示。
+- **边加载边播放(流式)**:视频 / 音频不再整文件下载完才播,而是由一个 **Service Worker**(`public/sw.js`)对外提供 `/__media/<id>` 虚拟地址。`<video>/<audio>` 向它发起带 `Range` 的请求,SW 通过 `MessageChannel` 向页面索要对应字节区间,页面用 `store.readRange()` **只解密命中的那几个分片**(带 8 片 LRU 缓存 + 并发去重)并回以 `206 Partial Content`。于是浏览器原生管线接管:**点开即播、可任意拖动进度条**,任意编码、`moov` 在尾部的 MP4 也能播(它会先 range 取文件尾)。SW 不可用时自动回退到整文件下载预览。
 - **分享 / 跨标签页**:房间号写入 URL 的 `#room=xxx`,分享链接即同一网盘;`y-websocket` 还通过 BroadcastChannel 在同浏览器多标签间同步。
+- **分享视频/音频在线观看**:视频、音频行有 `🔗 分享` 按钮,复制出 `#watch=<房间>&v=<文件id>` 链接(`watch.js`)。对方打开即进入一个**专门的全屏播放页**:连上该房间 → 等元数据同步 → 走同一套流式播放(`mediaUrl`),即点即看、可拖动进度;无需进网盘界面。解密密钥由房间名推导,故有链接即可解密播放。
 
 ### 6. 加密(默认开启)
 
@@ -124,11 +126,15 @@ index.html          页面入口(Tailwind 布局,引用 /src/main.js)
 vite.config.js      Vite + @tailwindcss/vite
 wrangler.jsonc      Cloudflare 静态资源部署配置
 src/
-  store.js          CRDT 数据层:Yjs doc + provider,文件/文件夹增删查
+  store.js          CRDT 数据层:Yjs doc + provider,文件/文件夹增删查;readRange 按区间读分片
   main.js           页面逻辑:导航、搜索、分类、上传、渲染
-  preview.js        预览弹窗(图片/视频/音频/PDF/文本)
+  preview.js        预览弹窗(图片/视频/音频/PDF/文本),视频/音频走流式播放
+  media.js          流式播放页面侧桥:注册 SW、应答字节区间请求、给出 mediaUrl(id)
+  watch.js          分享链接全屏播放页:#watch=<房间>&v=<id>,连房间→流式播放
   util.js           格式化、路径运算、类型分类
   style.css         Tailwind 入口与组件类
+public/
+  sw.js             媒体流 Service Worker:把 /__media/<id> 的 Range 请求转交页面,返回 206
 ```
 
 ---
