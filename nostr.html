@@ -3,18 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>dmhy → Flow · BT 自动上传</title>
-  <script type="module" crossorigin src="./assets/dmhy-w3T-o_YU.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/servers-ByPkOWOS.js">
-  <link rel="stylesheet" crossorigin href="./assets/servers-1aPierID.css">
+<title>Nostr → Flow · 笔记自动保存</title>
 </head>
 <body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
 
   <header class="sticky top-0 z-20 border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
     <div class="mx-auto flex max-w-3xl flex-wrap items-center gap-3 px-5 py-3.5">
       <div>
-        <h1 class="text-[15px] font-semibold leading-none">dmhy → Flow</h1>
-        <p class="mt-1 text-[11px] leading-none text-slate-500">动漫花园 BT → Re:Earth Flow CRDT 网盘</p>
+        <h1 class="text-[15px] font-semibold leading-none">Nostr → Flow</h1>
+        <p class="mt-1 text-[11px] leading-none text-slate-500">公开继电器 kind:1 → Re:Earth Flow CRDT 网盘</p>
       </div>
       <div class="ml-auto flex flex-wrap items-center gap-2">
         <span class="pill"><span id="dot" class="dot"></span><span id="run-status">初始化…</span></span>
@@ -27,34 +24,40 @@
     <section class="space-y-3">
       <p class="text-sm text-slate-400">
         打开本页后<strong class="font-medium text-slate-200">一直循环</strong>直到点「停止」：
-        ① 抓取 <code class="text-slate-300">dmhy.org</code> →
-        ② 下载尚未入库的 <code class="text-slate-300">.torrent</code> 字节 →
-        ③ <code class="text-slate-300">Store.upload</code> 到
-        <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code> →
-        本轮结束后立刻再抓（无新资源则等几秒）。不上传 magnet / URL / 元数据占位。
+        连接下方 3 个公开 Nostr 继电器 → 拉取最新 <code class="text-slate-300">kind:1</code> 文本笔记 →
+        <code class="text-slate-300">Store.upload</code> 到
+        <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code>
+        （房间 <code class="text-slate-300">nostr</code>，不与 dmhy-bt 混用）。
+        按 event id 去重；无新消息则等几秒再拉。每条保存成功后立即释放内存。
       </p>
+      <p id="relay-why" class="text-xs text-slate-500"></p>
 
       <div class="flex flex-wrap items-end gap-2.5">
         <label class="flex-1 min-w-[160px]">
           <span class="mb-1 block text-xs text-slate-500">网盘房间</span>
-          <input id="room" class="input w-full" type="text" placeholder="dmhy-bt" />
+          <input id="room" class="input w-full" type="text" placeholder="nostr" />
         </label>
         <label class="w-28">
-          <span class="mb-1 block text-xs text-slate-500">条数上限</span>
-          <input id="limit" class="input w-full" type="number" min="1" max="50" value="10" />
+          <span class="mb-1 block text-xs text-slate-500">每轮条数</span>
+          <input id="limit" class="input w-full" type="number" min="1" max="100" value="40" />
         </label>
-        <button id="btn-run" class="btn">开始抓取并上传</button>
+        <button id="btn-run" class="btn">开始拉取并保存</button>
         <button id="btn-stop" class="btn-ghost" disabled>停止</button>
       </div>
 
       <div class="h-1.5 overflow-hidden rounded-full bg-white/10">
         <div id="bar" class="h-full w-0 bg-brand-500 transition-[width] duration-200"></div>
       </div>
-      <div class="text-xs text-slate-500">待上传条目：<b id="count" class="text-slate-300">0</b></div>
+      <div class="text-xs text-slate-500">本轮笔记：<b id="count" class="text-slate-300">0</b> · 继电器：<span id="relay-status" class="text-slate-400">—</span></div>
     </section>
 
     <section>
-      <h2 class="mb-2 text-sm font-semibold text-slate-300">本次条目</h2>
+      <h2 class="mb-2 text-sm font-semibold text-slate-300">继电器</h2>
+      <ul id="relays" class="space-y-1 text-xs font-mono text-slate-400"></ul>
+    </section>
+
+    <section>
+      <h2 class="mb-2 text-sm font-semibold text-slate-300">本轮预览</h2>
       <div id="items" class="space-y-2"></div>
     </section>
 
@@ -64,5 +67,6 @@
     </section>
   </main>
 
+  <script type="module" src="/src/nostr.js"></script>
 </body>
 </html>

@@ -122,7 +122,7 @@ npm run build && npx wrangler deploy
 
 ### dmhy → Flow BT 上传页
 
-打开 `/dmhy.html`：自动抓取 [动漫花园](https://www.dmhy.org/) → **下载 `.torrent` 文件字节** → `Store.upload` 到 `wss://ws.flow.plateau.reearth.io`（默认房间 `dmhy-bt`），**一直循环直到点停止**（无新资源默认等 5s 再抓）。开发时由 Vite 中间件、部署时由 `worker.js` 提供 `/api/dmhy/*` 代理。可选：`VITE_FLOW_TOKEN` / `VITE_DMHY_ROOM` / `VITE_DMHY_LIMIT` / `VITE_DMHY_AUTO` / `VITE_DMHY_IDLE_MS` / `VITE_DMHY_ERROR_MS`。
+打开 `/dmhy.html`：自动抓取 [动漫花园](https://www.dmhy.org/) → **下载 `.torrent` 文件字节** → `Store.upload` 到 `wss://ws.flow.plateau.reearth.io`（默认房间 `dmhy-bt`），**一直循环直到点停止**（无新资源默认等 5s 再抓）。另有 `/nostr.html`：从 3 个公开 Nostr 继电器拉最新 kind:1 笔记保存到房间 `nostr`。开发时由 Vite 中间件、部署时由 `worker.js` 提供 `/api/dmhy/*` 代理。可选：`VITE_FLOW_TOKEN` / `VITE_DMHY_*` / `VITE_NOSTR_*`。
 
 ---
 

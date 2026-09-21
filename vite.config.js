@@ -61,6 +61,7 @@ export default defineConfig({
       input: {
         main: 'index.html',
         dmhy: 'dmhy.html',
+        nostr: 'nostr.html',
       },
     },
   },
