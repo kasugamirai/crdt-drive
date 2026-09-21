@@ -16,6 +16,9 @@ const DEFAULT_ROOM = import.meta.env.VITE_DMHY_ROOM || 'dmhy-bt'
 const DEFAULT_LIMIT = Number(import.meta.env.VITE_DMHY_LIMIT || 10)
 const RSS_PATH = import.meta.env.VITE_DMHY_RSS || '/api/dmhy/rss'
 const AUTO_START = String(import.meta.env.VITE_DMHY_AUTO ?? '1') !== '0'
+// Idle delay between passes when nothing new was uploaded (avoids tight-loop).
+const IDLE_MS = Math.max(1000, Number(import.meta.env.VITE_DMHY_IDLE_MS || 5000))
+const ERROR_BACKOFF_MS = Math.max(1000, Number(import.meta.env.VITE_DMHY_ERROR_MS || 8000))
 
 const $ = id => document.getElementById(id)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -23,6 +26,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms))
 const store = new Store(localStorage.getItem('crdt-ws') || DEFAULT_WS, TOKEN)
 let running = false
 let abort = false
+let pass = 0
+let statusHandlerBound = false
 
 function log(msg, kind = 'info') {
   const el = $('log')
@@ -32,6 +37,7 @@ function log(msg, kind = 'info') {
   )
   line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`
   el.prepend(line)
+  while (el.children.length > 200) el.lastChild.remove()
 }
 
 function setStatus(text, on = null) {
@@ -120,6 +126,28 @@ function waitSynced(timeoutMs = 15000) {
   })
 }
 
+async function ensureConnected(room) {
+  store.wsUrl = DEFAULT_WS
+  localStorage.setItem('crdt-ws', DEFAULT_WS)
+  if (store.room !== room || !store.provider) {
+    store.connect(room)
+    if (!statusHandlerBound) {
+      statusHandlerBound = true
+      store.on('status', s => {
+        if (running) {
+          if (s === 'connected') { /* keep pass status */ }
+          else if (s === 'connecting') setStatus('连接中…', false)
+          else setStatus('已断开', false)
+        }
+      })
+    }
+  }
+  setStatus('连接 Flow…', false)
+  await waitSynced()
+  if (!store.dirs.has('dmhy')) store.createFolder('', 'dmhy')
+  await sleep(200)
+}
+
 async function uploadItem(item, names) {
   const base = safeFileBase(item.title, item.infoHash)
   const fileName = base + '.torrent'
@@ -158,73 +186,94 @@ function renderList(items) {
   }
 }
 
-async function runPipeline() {
+/** One scrape → download → upload pass. Returns { ok, skip, fail }. */
+async function runPass(limit) {
+  pass++
+  setStatus(`第 ${pass} 轮 · 拉取 RSS…`, true)
+  log(`pass #${pass}: fetch RSS`)
+  const all = await fetchRss()
+  const items = all.slice(0, limit)
+  log(`pass #${pass}: RSS ${all.length} items, batch ${items.length}`)
+  renderList(items)
+  $('count').textContent = String(items.length)
+
+  const names = existingNames()
+  let ok = 0, skip = 0, fail = 0
+  for (let i = 0; i < items.length; i++) {
+    if (abort) break
+    const it = items[i]
+    setStatus(`第 ${pass} 轮 · 上传 ${i + 1}/${items.length}`, true)
+    $('bar').style.width = `${Math.round((i / Math.max(items.length, 1)) * 100)}%`
+    try {
+      const r = await uploadItem(it, names)
+      if (r.skipped) {
+        skip++
+        log(`skip exists: ${r.fileName}`)
+      } else {
+        ok++
+        log(`ok torrent ${fmt(r.bytes)} → ${r.fileName}`, 'ok')
+      }
+    } catch (e) {
+      fail++
+      log(`fail: ${it.title?.slice(0, 40)} — ${e.message}`, 'err')
+    }
+    await sleep(200)
+  }
+  $('bar').style.width = '100%'
+  log(`pass #${pass} done ok=${ok} skip=${skip} fail=${fail}`, fail ? 'err' : 'ok')
+  return { ok, skip, fail }
+}
+
+async function runLoop() {
   if (running) return
   running = true
   abort = false
+  pass = 0
   $('btn-run').disabled = true
   $('btn-stop').disabled = false
-  setStatus('抓取 RSS…')
 
   const room = ($('room').value || DEFAULT_ROOM).trim()
   const limit = Math.max(1, Math.min(50, Number($('limit').value) || DEFAULT_LIMIT))
   localStorage.setItem('dmhy-room', room)
   localStorage.setItem('dmhy-limit', String(limit))
 
+  let errStreak = 0
+  log(`loop start → ${DEFAULT_WS} room=${room} (idle ${IDLE_MS}ms when nothing new)`)
+
   try {
-    store.wsUrl = DEFAULT_WS
-    localStorage.setItem('crdt-ws', DEFAULT_WS)
-    store.connect(room)
-    setStatus('连接 Flow…', false)
-    store.on('status', s => {
-      if (s === 'connected') setStatus('已连接 · 同步中', true)
-      else if (s === 'connecting') setStatus('连接中…', false)
-      else setStatus('已断开', false)
-    })
-    await waitSynced()
-    if (!store.dirs.has('dmhy')) store.createFolder('', 'dmhy')
-    await sleep(300)
-
-    log(`connected ${DEFAULT_WS} / room=${room}`)
-    setStatus('拉取 dmhy RSS…', true)
-    const all = await fetchRss()
-    const items = all.slice(0, limit)
-    log(`RSS items: ${all.length}, uploading first ${items.length}`)
-    renderList(items)
-    $('count').textContent = String(items.length)
-
-    const names = existingNames()
-    let ok = 0, skip = 0, fail = 0
-    for (let i = 0; i < items.length; i++) {
-      if (abort) { log('aborted by user'); break }
-      const it = items[i]
-      setStatus(`上传 ${i + 1}/${items.length}`, true)
-      $('bar').style.width = `${Math.round((i / items.length) * 100)}%`
+    while (!abort) {
       try {
-        const r = await uploadItem(it, names)
-        if (r.skipped) {
-          skip++
-          log(`skip exists: ${r.fileName}`)
-        } else {
-          ok++
-          log(`ok torrent ${fmt(r.bytes)} → ${r.fileName}`, 'ok')
+        await ensureConnected(room)
+        const { ok, skip, fail } = await runPass(limit)
+        if (abort) break
+        errStreak = 0
+
+        if (ok > 0) {
+          // New torrents landed — scrape again immediately for the latest.
+          setStatus(`第 ${pass} 轮完成 · 立即下一轮…`, true)
+          continue
         }
+
+        // All skips / no new uploads — wait so we don't tight-loop.
+        const wait = IDLE_MS
+        setStatus(`无新资源 · ${Math.round(wait / 1000)}s 后再抓…`, true)
+        log(`no new uploads (skip=${skip} fail=${fail}); sleep ${wait}ms`)
+        await sleep(wait)
       } catch (e) {
-        fail++
-        log(`fail: ${it.title?.slice(0, 40)} — ${e.message}`, 'err')
+        errStreak++
+        const wait = Math.min(ERROR_BACKOFF_MS * errStreak, 60_000)
+        setStatus(`错误 · ${Math.round(wait / 1000)}s 后重试`, false)
+        log(`loop error: ${e.message}; backoff ${wait}ms`, 'err')
+        if (abort) break
+        await sleep(wait)
       }
-      await sleep(200)
     }
-    $('bar').style.width = '100%'
-    setStatus(`完成 · 成功 ${ok} / 跳过 ${skip} / 失败 ${fail}`, true)
-    log(`done ok=${ok} skip=${skip} fail=${fail}`, fail ? 'err' : 'ok')
-  } catch (e) {
-    setStatus('失败: ' + e.message, false)
-    log(e.message, 'err')
   } finally {
     running = false
     $('btn-run').disabled = false
     $('btn-stop').disabled = true
+    setStatus(abort ? '已停止' : '待命', abort ? false : null)
+    log(abort ? 'loop stopped by user' : 'loop ended')
   }
 }
 
@@ -232,19 +281,23 @@ function boot() {
   $('ws').textContent = DEFAULT_WS
   $('room').value = localStorage.getItem('dmhy-room') || DEFAULT_ROOM
   $('limit').value = localStorage.getItem('dmhy-limit') || String(DEFAULT_LIMIT)
-  $('btn-run').onclick = () => runPipeline()
-  $('btn-stop').onclick = () => { abort = true; log('stop requested…') }
+  $('btn-run').onclick = () => runLoop()
+  $('btn-stop').onclick = () => {
+    abort = true
+    setStatus('正在停止…', false)
+    log('stop requested — finishing current item then exiting loop')
+  }
   $('open-drive').href = `./index.html#room=${encodeURIComponent($('room').value || DEFAULT_ROOM)}`
   $('room').addEventListener('change', () => {
     $('open-drive').href = `./index.html#room=${encodeURIComponent($('room').value || DEFAULT_ROOM)}`
   })
 
   if (AUTO_START) {
-    log('auto-start enabled — fetching dmhy and uploading to plateau Flow')
-    runPipeline()
+    log('auto-start: continuous dmhy → Flow loop until Stop')
+    runLoop()
   } else {
     setStatus('待命 · 点击「开始抓取并上传」')
-    log('auto-start off (VITE_DMHY_AUTO=0) — click Run')
+    log('auto-start off (VITE_DMHY_AUTO=0) — click Run to loop')
   }
 }
 

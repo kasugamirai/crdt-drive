@@ -122,7 +122,7 @@ npm run build && npx wrangler deploy
 
 ### dmhy → Flow BT 上传页
 
-打开 `/dmhy.html`：自动抓取 [动漫花园](https://www.dmhy.org/) 最新条目 → **下载 `.torrent` 文件字节** → 用同一套 `Store.upload` 上传到 `wss://ws.flow.plateau.reearth.io`（默认房间 `dmhy-bt`）。开发时由 Vite 中间件、部署时由 `worker.js` 提供 `/api/dmhy/*` 代理以绕过 CORS。可选环境变量见 `VITE_FLOW_TOKEN` / `VITE_DMHY_ROOM` / `VITE_DMHY_LIMIT` / `VITE_DMHY_AUTO`。
+打开 `/dmhy.html`：自动抓取 [动漫花园](https://www.dmhy.org/) → **下载 `.torrent` 文件字节** → `Store.upload` 到 `wss://ws.flow.plateau.reearth.io`（默认房间 `dmhy-bt`），**一直循环直到点停止**（无新资源默认等 5s 再抓）。开发时由 Vite 中间件、部署时由 `worker.js` 提供 `/api/dmhy/*` 代理。可选：`VITE_FLOW_TOKEN` / `VITE_DMHY_ROOM` / `VITE_DMHY_LIMIT` / `VITE_DMHY_AUTO` / `VITE_DMHY_IDLE_MS` / `VITE_DMHY_ERROR_MS`。
 
 ---
 

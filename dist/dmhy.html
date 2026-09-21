@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>dmhy → Flow · BT 自动上传</title>
-  <script type="module" crossorigin src="./assets/dmhy-D8ArS8f0.js"></script>
-  <link rel="modulepreload" crossorigin href="./assets/servers-COwpWutM.js">
-  <link rel="stylesheet" crossorigin href="./assets/servers-DUSm8mxC.css">
+  <script type="module" crossorigin src="./assets/dmhy-BqB3OzgJ.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/servers-CfIBYb-a.js">
+  <link rel="stylesheet" crossorigin href="./assets/servers-CUq_CvVE.css">
 </head>
 <body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
 
@@ -26,11 +26,12 @@
   <main class="mx-auto max-w-3xl px-5 py-6 space-y-5">
     <section class="space-y-3">
       <p class="text-sm text-slate-400">
-        打开本页后自动：① 抓取 <code class="text-slate-300">dmhy.org</code> 条目 →
-        ② 下载每个 <code class="text-slate-300">.torrent</code> 文件字节 →
-        ③ 用 CRDT <code class="text-slate-300">Store.upload</code> 上传到
-        <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code>。
-        不上传 magnet / 页面 URL / 元数据占位。同源 <code class="text-slate-300">/api/dmhy/*</code> 代理绕过 CORS。
+        打开本页后<strong class="font-medium text-slate-200">一直循环</strong>直到点「停止」：
+        ① 抓取 <code class="text-slate-300">dmhy.org</code> →
+        ② 下载尚未入库的 <code class="text-slate-300">.torrent</code> 字节 →
+        ③ <code class="text-slate-300">Store.upload</code> 到
+        <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code> →
+        本轮结束后立刻再抓（无新资源则等几秒）。不上传 magnet / URL / 元数据占位。
       </p>
 
       <div class="flex flex-wrap items-end gap-2.5">
