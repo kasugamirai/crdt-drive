@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>dmhy → Flow · BT 自动上传</title>
+  <script type="module" crossorigin src="./assets/dmhy-D8ArS8f0.js"></script>
+  <link rel="modulepreload" crossorigin href="./assets/servers-COwpWutM.js">
+  <link rel="stylesheet" crossorigin href="./assets/servers-DUSm8mxC.css">
+</head>
+<body class="min-h-screen bg-slate-950 bg-[radial-gradient(60rem_40rem_at_70%_-10%,rgba(79,124,255,.18),transparent),radial-gradient(50rem_30rem_at_0%_0%,rgba(124,79,255,.12),transparent)] text-slate-100 antialiased">
+
+  <header class="sticky top-0 z-20 border-b border-white/10 bg-slate-950/70 backdrop-blur-xl">
+    <div class="mx-auto flex max-w-3xl flex-wrap items-center gap-3 px-5 py-3.5">
+      <div>
+        <h1 class="text-[15px] font-semibold leading-none">dmhy → Flow</h1>
+        <p class="mt-1 text-[11px] leading-none text-slate-500">动漫花园 BT → Re:Earth Flow CRDT 网盘</p>
+      </div>
+      <div class="ml-auto flex flex-wrap items-center gap-2">
+        <span class="pill"><span id="dot" class="dot"></span><span id="run-status">初始化…</span></span>
+        <a id="open-drive" class="btn-ghost text-xs" href="./index.html">打开网盘</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-3xl px-5 py-6 space-y-5">
+    <section class="space-y-3">
+      <p class="text-sm text-slate-400">
+        打开本页后自动：① 抓取 <code class="text-slate-300">dmhy.org</code> 条目 →
+        ② 下载每个 <code class="text-slate-300">.torrent</code> 文件字节 →
+        ③ 用 CRDT <code class="text-slate-300">Store.upload</code> 上传到
+        <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code>。
+        不上传 magnet / 页面 URL / 元数据占位。同源 <code class="text-slate-300">/api/dmhy/*</code> 代理绕过 CORS。
+      </p>
+
+      <div class="flex flex-wrap items-end gap-2.5">
+        <label class="flex-1 min-w-[160px]">
+          <span class="mb-1 block text-xs text-slate-500">网盘房间</span>
+          <input id="room" class="input w-full" type="text" placeholder="dmhy-bt" />
+        </label>
+        <label class="w-28">
+          <span class="mb-1 block text-xs text-slate-500">条数上限</span>
+          <input id="limit" class="input w-full" type="number" min="1" max="50" value="10" />
+        </label>
+        <button id="btn-run" class="btn">开始抓取并上传</button>
+        <button id="btn-stop" class="btn-ghost" disabled>停止</button>
+      </div>
+
+      <div class="h-1.5 overflow-hidden rounded-full bg-white/10">
+        <div id="bar" class="h-full w-0 bg-brand-500 transition-[width] duration-200"></div>
+      </div>
+      <div class="text-xs text-slate-500">待上传条目：<b id="count" class="text-slate-300">0</b></div>
+    </section>
+
+    <section>
+      <h2 class="mb-2 text-sm font-semibold text-slate-300">本次条目</h2>
+      <div id="items" class="space-y-2"></div>
+    </section>
+
+    <section>
+      <h2 class="mb-2 text-sm font-semibold text-slate-300">日志</h2>
+      <div id="log" class="max-h-72 space-y-1 overflow-auto rounded-xl border border-white/10 bg-black/30 p-3"></div>
+    </section>
+  </main>
+
+</body>
+</html>

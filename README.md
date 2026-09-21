@@ -120,15 +120,25 @@ npm run build && npx wrangler deploy
 
 ---
 
+### dmhy → Flow BT 上传页
+
+打开 `/dmhy.html`：自动抓取 [动漫花园](https://www.dmhy.org/) 最新条目 → **下载 `.torrent` 文件字节** → 用同一套 `Store.upload` 上传到 `wss://ws.flow.plateau.reearth.io`（默认房间 `dmhy-bt`）。开发时由 Vite 中间件、部署时由 `worker.js` 提供 `/api/dmhy/*` 代理以绕过 CORS。可选环境变量见 `VITE_FLOW_TOKEN` / `VITE_DMHY_ROOM` / `VITE_DMHY_LIMIT` / `VITE_DMHY_AUTO`。
+
+---
+
 ## 工程结构
 
 ```
 index.html          页面入口(Tailwind 布局,引用 /src/main.js)
-vite.config.js      Vite + @tailwindcss/vite
-wrangler.jsonc      Cloudflare 静态资源部署配置
+dmhy.html           dmhy BT 抓取并上传到 Flow 的页面
+worker.js           Cloudflare Worker：静态资源 + /api/dmhy/* 代理
+vite.config.js      Vite + Tailwind + 本地 dmhy 代理
+wrangler.jsonc      Cloudflare 部署(Worker + dist assets)
 src/
   store.js          CRDT 数据层:Yjs doc + provider,文件/文件夹增删查;readRange 按区间读分片
   main.js           页面逻辑:导航、搜索、分类、上传、渲染
+  dmhy.js           dmhy 抓取 / .torrent 下载 / Flow 上传
+  dmhy-parse.js     RSS 与 topic 页解析
   preview.js        预览弹窗(图片/视频/音频/PDF/文本),视频/音频走流式播放
   media.js          流式播放页面侧桥:注册 SW、应答字节区间请求、给出 mediaUrl(id)
   watch.js          分享链接全屏播放页:#watch=<房间>&v=<id>,连房间→流式播放
