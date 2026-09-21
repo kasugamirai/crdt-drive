@@ -113,7 +113,7 @@ function renderRelays() {
   }
 }
 
-/** Fetch latest kind:1 notes from one relay (REQ → EVENT* → EOSE). */
+/** Fetch latest events of any kind from one relay (REQ → EVENT* → EOSE). */
 function fetchFromRelay(relayUrl, { limit, since }, timeoutMs = 12000) {
   return new Promise((resolve) => {
     const events = []
@@ -134,7 +134,8 @@ function fetchFromRelay(relayUrl, { limit, since }, timeoutMs = 12000) {
     const subId = 'n' + Math.random().toString(36).slice(2, 10)
     const timer = setTimeout(done, timeoutMs)
     ws.onopen = () => {
-      const filter = { kinds: [1], limit }
+      // No kinds filter — pull every kind the relay returns (latest only via limit/since).
+      const filter = { limit }
       if (since > 0) filter.since = since
       ws.send(JSON.stringify(['REQ', subId, filter]))
     }
@@ -144,7 +145,7 @@ function fetchFromRelay(relayUrl, { limit, since }, timeoutMs = 12000) {
       if (!Array.isArray(msg)) return
       if (msg[0] === 'EVENT' && msg[1] === subId && msg[2]) {
         const e = msg[2]
-        if (e.kind === 1 && e.id && typeof e.content === 'string') events.push(e)
+        if (e && e.id) events.push(e)
       } else if (msg[0] === 'EOSE' && msg[1] === subId) {
         clearTimeout(timer)
         try { ws.send(JSON.stringify(['CLOSE', subId])) } catch { /* */ }
@@ -273,6 +274,7 @@ function renderPreview(events) {
     row.innerHTML = `
       <div class="text-sm text-slate-100 break-words">${esc(snippet || '(empty)')}</div>
       <div class="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
+        <span>kind ${esc(String(e.kind ?? '?'))}</span>
         <span class="font-mono">${esc(String(e.id || '').slice(0, 12))}…</span>
         <span>${e.created_at ? new Date(e.created_at * 1000).toLocaleString() : ''}</span>
       </div>`
@@ -283,13 +285,13 @@ function renderPreview(events) {
 async function runPass(limit) {
   pass++
   setStatus(`第 ${pass} 轮 · 拉取 Nostr…`, true)
-  log(`pass #${pass}: REQ kind:1 limit=${limit}` + (sinceTs ? ` since=${sinceTs}` : ' (latest)'))
+  log(`pass #${pass}: REQ all-kinds limit=${limit}` + (sinceTs ? ` since=${sinceTs}` : ' (latest)'))
 
   // Hold events only for this pass; clear after saving.
   let events = await fetchLatestNotes(limit)
   $('count').textContent = String(events.length)
   renderPreview(events)
-  log(`pass #${pass}: ${events.length} unique notes from relays`)
+  log(`pass #${pass}: ${events.length} unique events from relays`)
 
   const names = existingNames()
   let ok = 0, skip = 0, fail = 0
@@ -354,7 +356,7 @@ async function runLoop() {
         }
 
         const wait = IDLE_MS
-        setStatus(`无新笔记 · ${Math.round(wait / 1000)}s 后再拉…`, true)
+        setStatus(`无新事件 · ${Math.round(wait / 1000)}s 后再拉…`, true)
         log(`no new saves (skip=${skip} fail=${fail}); sleep ${wait}ms`)
         // After first "latest" pass, advance watermark so later REQ uses since=
         // (still limited — never backfills full history).

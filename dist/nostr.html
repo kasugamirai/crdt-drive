@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Nostr → Flow · 笔记自动保存</title>
-  <script type="module" crossorigin src="./assets/nostr-uj-SC1e_.js"></script>
+  <script type="module" crossorigin src="./assets/nostr-DHnfrRW-.js"></script>
   <link rel="modulepreload" crossorigin href="./assets/servers-ByPkOWOS.js">
   <link rel="stylesheet" crossorigin href="./assets/servers-1aPierID.css">
 </head>
@@ -14,7 +14,7 @@
     <div class="mx-auto flex max-w-3xl flex-wrap items-center gap-3 px-5 py-3.5">
       <div>
         <h1 class="text-[15px] font-semibold leading-none">Nostr → Flow</h1>
-        <p class="mt-1 text-[11px] leading-none text-slate-500">公开继电器 kind:1 → Re:Earth Flow CRDT 网盘</p>
+        <p class="mt-1 text-[11px] leading-none text-slate-500">公开继电器全部 kind → Re:Earth Flow CRDT 网盘</p>
       </div>
       <div class="ml-auto flex flex-wrap items-center gap-2">
         <span class="pill"><span id="dot" class="dot"></span><span id="run-status">初始化…</span></span>
@@ -27,7 +27,7 @@
     <section class="space-y-3">
       <p class="text-sm text-slate-400">
         打开本页后<strong class="font-medium text-slate-200">一直循环</strong>直到点「停止」：
-        连接下方 3 个公开 Nostr 继电器 → 拉取最新 <code class="text-slate-300">kind:1</code> 文本笔记 →
+        连接下方 3 个公开 Nostr 继电器 → 拉取最新<strong class="font-medium text-slate-300">全部 kind</strong>事件 →
         <code class="text-slate-300">Store.upload</code> 到
         <code id="ws" class="text-slate-300">wss://ws.flow.plateau.reearth.io</code>
         （房间 <code class="text-slate-300">nostr</code>，不与 dmhy-bt 混用）。
@@ -51,7 +51,7 @@
       <div class="h-1.5 overflow-hidden rounded-full bg-white/10">
         <div id="bar" class="h-full w-0 bg-brand-500 transition-[width] duration-200"></div>
       </div>
-      <div class="text-xs text-slate-500">本轮笔记：<b id="count" class="text-slate-300">0</b> · 继电器：<span id="relay-status" class="text-slate-400">—</span></div>
+      <div class="text-xs text-slate-500">本轮事件：<b id="count" class="text-slate-300">0</b> · 继电器：<span id="relay-status" class="text-slate-400">—</span></div>
     </section>
 
     <section>
