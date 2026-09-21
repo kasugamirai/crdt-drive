@@ -155,18 +155,35 @@ async function uploadItem(item, names) {
     return { skipped: true, fileName }
   }
 
-  // Must obtain real .torrent bytes before any upload
-  const payload = await fetchTorrentBytes(item)
-  const file = new File([payload.bytes], fileName, { type: 'application/x-bittorrent' })
-  const id = await store.upload(file, 'dmhy')
-  names.add(fileName)
-  return {
-    skipped: false,
-    fileName,
-    id,
-    bytes: payload.bytes.byteLength,
-    source: payload.source,
-    infoHash: item.infoHash || magnetInfoHash(item.magnet),
+  // Local temps only — cleared in finally so each file's buffer can GC immediately.
+  let bytes = null
+  let file = null
+  let source = ''
+  try {
+    const payload = await fetchTorrentBytes(item)
+    bytes = payload.bytes
+    source = payload.source
+    payload.bytes = null
+    const size = bytes.byteLength
+    file = new File([bytes], fileName, { type: 'application/x-bittorrent' })
+    // Drop the Uint8Array view before upload; File holds the blob for Store.upload.
+    bytes = null
+
+    const id = await store.upload(file, 'dmhy')
+    names.add(fileName)
+    // Scalar metadata only — never return Uint8Array / File / ArrayBuffer.
+    return {
+      skipped: false,
+      fileName,
+      id,
+      bytes: size,
+      source,
+      infoHash: item.infoHash || magnetInfoHash(item.magnet),
+    }
+  } finally {
+    bytes = null
+    file = null
+    source = ''
   }
 }
 
