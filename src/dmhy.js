@@ -19,6 +19,8 @@ const AUTO_START = String(import.meta.env.VITE_DMHY_AUTO ?? '1') !== '0'
 // Idle delay between passes when nothing new was uploaded (avoids tight-loop).
 const IDLE_MS = Math.max(1000, Number(import.meta.env.VITE_DMHY_IDLE_MS || 5000))
 const ERROR_BACKOFF_MS = Math.max(1000, Number(import.meta.env.VITE_DMHY_ERROR_MS || 8000))
+// Max torrents downloading+uploading at once (no larger prefetch into memory).
+const CONCURRENCY = Math.max(1, Math.min(3, Number(import.meta.env.VITE_DMHY_CONCURRENCY || 3) || 3))
 
 const $ = id => document.getElementById(id)
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -154,6 +156,8 @@ async function uploadItem(item, names) {
   if (names.has(fileName)) {
     return { skipped: true, fileName }
   }
+  // Reserve name before download so concurrent workers don't fetch the same file twice.
+  names.add(fileName)
 
   // Local temps only — cleared in finally so each file's buffer can GC immediately.
   let bytes = null
@@ -170,7 +174,6 @@ async function uploadItem(item, names) {
     bytes = null
 
     const id = await store.upload(file, 'dmhy')
-    names.add(fileName)
     // Scalar metadata only — never return Uint8Array / File / ArrayBuffer.
     return {
       skipped: false,
@@ -180,6 +183,9 @@ async function uploadItem(item, names) {
       source,
       infoHash: item.infoHash || magnetInfoHash(item.magnet),
     }
+  } catch (e) {
+    names.delete(fileName) // allow retry on a later pass
+    throw e
   } finally {
     bytes = null
     file = null
@@ -210,32 +216,43 @@ async function runPass(limit) {
   log(`pass #${pass}: fetch RSS`)
   const all = await fetchRss()
   const items = all.slice(0, limit)
-  log(`pass #${pass}: RSS ${all.length} items, batch ${items.length}`)
+  log(`pass #${pass}: RSS ${all.length} items, batch ${items.length}, concurrency ${CONCURRENCY}`)
   renderList(items)
   $('count').textContent = String(items.length)
 
   const names = existingNames()
-  let ok = 0, skip = 0, fail = 0
-  for (let i = 0; i < items.length; i++) {
-    if (abort) break
-    const it = items[i]
-    setStatus(`第 ${pass} 轮 · 上传 ${i + 1}/${items.length}`, true)
-    $('bar').style.width = `${Math.round((i / Math.max(items.length, 1)) * 100)}%`
-    try {
-      const r = await uploadItem(it, names)
-      if (r.skipped) {
-        skip++
-        log(`skip exists: ${r.fileName}`)
-      } else {
-        ok++
-        log(`ok torrent ${fmt(r.bytes)} → ${r.fileName}`, 'ok')
-      }
-    } catch (e) {
-      fail++
-      log(`fail: ${it.title?.slice(0, 40)} — ${e.message}`, 'err')
-    }
-    await sleep(200)
+  let ok = 0, skip = 0, fail = 0, done = 0, next = 0
+  const report = () => {
+    $('bar').style.width = `${Math.round((done / Math.max(items.length, 1)) * 100)}%`
+    setStatus(`第 ${pass} 轮 · ${done}/${items.length}（并行≤${CONCURRENCY}）`, true)
   }
+
+  // Worker pool: claim next index only when a slot is free — no prefetch of torrent bytes.
+  const worker = async () => {
+    while (!abort) {
+      const i = next++
+      if (i >= items.length) return
+      const it = items[i]
+      try {
+        const r = await uploadItem(it, names)
+        if (r.skipped) {
+          skip++
+          log(`skip exists: ${r.fileName}`)
+        } else {
+          ok++
+          log(`ok torrent ${fmt(r.bytes)} → ${r.fileName}`, 'ok')
+        }
+      } catch (e) {
+        fail++
+        log(`fail: ${it.title?.slice(0, 40)} — ${e.message}`, 'err')
+      }
+      done++
+      report()
+    }
+  }
+
+  const n = Math.min(CONCURRENCY, items.length)
+  if (n > 0) await Promise.all(Array.from({ length: n }, () => worker()))
   $('bar').style.width = '100%'
   log(`pass #${pass} done ok=${ok} skip=${skip} fail=${fail}`, fail ? 'err' : 'ok')
   return { ok, skip, fail }
